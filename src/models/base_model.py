@@ -17,7 +17,7 @@ class PortraitSegmentationModel(ABC):
         pass
 
     @abstractmethod
-    def predict(self, image: np.ndarray) -> np.ndarray:
+    def predict(self, image: np.ndarray, max_size: int = None) -> np.ndarray:
         """
         执行推理
         :param image: 输入图像 (H, W, 3) RGB格式, uint8

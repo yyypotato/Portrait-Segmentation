@@ -3,6 +3,7 @@ import os
 os.environ['TORCH_HOME'] = './resources/weights'
 
 import torch
+import cv2
 import numpy as np
 from torchvision import models, transforms
 from PIL import Image
@@ -36,28 +37,46 @@ class DeepLabModel(PortraitSegmentationModel):
             print(f"模型加载失败: {e}")
             raise e
 
-    def predict(self, image: np.ndarray) -> np.ndarray:
+    def predict(self, image: np.ndarray, max_size: int = None) -> np.ndarray:
         if self.model is None:
             raise RuntimeError("模型未初始化")
 
-        # 1. 预处理
+        h, w = image.shape[:2]
+        scale_factor = 1.0
+        input_image_data = image
+
+        # --- 1. 动态缩放逻辑 ---
+        if max_size is not None and max(h, w) > max_size:
+            scale_factor = max_size / max(h, w)
+            new_w = int(w * scale_factor)
+            new_h = int(h * scale_factor)
+            # 使用线性插值缩小图片
+            input_image_data = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+            print(f"为了节省显存，图片已缩放: {w}x{h} -> {new_w}x{new_h}")
+
+        # --- 2. 预处理 ---
         preprocess = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
 
-        input_image = Image.fromarray(image)
-        input_tensor = preprocess(input_image)
+        input_pil = Image.fromarray(input_image_data)
+        input_tensor = preprocess(input_pil)
         input_batch = input_tensor.unsqueeze(0).to(self.device)
 
-        # 2. 推理 (这里不捕获异常，交给 GUI 层捕获以便弹窗)
+        # --- 3. 推理 ---
         with torch.no_grad():
             output = self.model(input_batch)['out'][0]
         
-        # 3. 后处理
+        # --- 4. 后处理 ---
         output_predictions = output.argmax(0).byte().cpu().numpy()
         
-        # COCO 数据集中 'person' 类别索引为 15
+        # --- 5. 还原尺寸 ---
+        if scale_factor != 1.0:
+            # 使用最近邻插值 (INTER_NEAREST) 还原掩码，保证只有 0, 1, 2... 整数类别
+            output_predictions = cv2.resize(output_predictions, (w, h), interpolation=cv2.INTER_NEAREST)
+
+        # 提取人像 (Index 15)
         person_idx = 15 
         mask = (output_predictions == person_idx).astype(np.uint8) * 255
         

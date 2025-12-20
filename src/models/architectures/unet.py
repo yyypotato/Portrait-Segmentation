@@ -11,7 +11,7 @@ class UNetModel(PortraitSegmentationModel):
         # TODO: 在这里加载您训练好的 U-Net .pth 文件
         pass
 
-    def predict(self, image: np.ndarray) -> np.ndarray:
+    def predict(self, image: np.ndarray, max_size: int = None) -> np.ndarray:
         print("U-Net 推理: 返回空掩码")
         h, w, _ = image.shape
         # 返回全黑图片

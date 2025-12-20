@@ -195,6 +195,20 @@ class SegPage(QWidget):
                 selection-background-color: #dfe6e9;
             }
         """)
+        # --- 新增：输入尺寸选择 ---
+        self.combo_size = QComboBox()
+        self.combo_size.addItems([
+            "原图尺寸 (显存大)",
+            "限制 1024px (均衡)",
+            "限制 512px (省显存)",
+            "限制 256px (极速)"
+        ])
+        self.combo_size.setFixedWidth(180)
+        self.combo_size.setToolTip("降低输入尺寸可以大幅减少显存占用，\n让 ResNet101 也能在普通显卡上运行。")
+        self.combo_size.setStyleSheet(self.combo_model.styleSheet()) # 复用样式
+        
+        # 默认选中 "限制 512px" (比较稳妥)
+        self.combo_size.setCurrentIndex(2) 
 
         # 分割按钮 (主要操作，用醒目的颜色)
         self.btn_run = QPushButton("⚡ 开始分割")
@@ -222,6 +236,8 @@ class SegPage(QWidget):
         layout.addStretch()
         layout.addWidget(arrow)
         layout.addWidget(self.combo_model)
+        layout.addWidget(QLabel("推理尺寸:")) # 建议加个标签提示
+        layout.addWidget(self.combo_size) 
         layout.addWidget(self.btn_run)
         layout.addStretch()
         
@@ -315,9 +331,17 @@ class SegPage(QWidget):
             # OpenCV 默认是 BGR，模型需要 RGB
             image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
 
+            # 获取用户选择的尺寸限制
+            size_text = self.combo_size.currentText()
+            max_size = None
+            if "1024" in size_text: max_size = 1024
+            elif "512" in size_text: max_size = 512
+            elif "256" in size_text: max_size = 256
+            # "原图尺寸" 则 max_size 为 None
+
             # 4. 模型推理
             # 返回的是 (H, W) 的掩码，0是背景，255是人像
-            mask = self.model.predict(image_rgb)
+            mask = self.model.predict(image_rgb,max_size=max_size)
 
             # 5. 后处理：生成透明背景图 (RGBA)
             h, w, c = image_rgb.shape
