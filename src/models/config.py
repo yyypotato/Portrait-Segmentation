@@ -1,9 +1,16 @@
 # 模型配置字典
 MODEL_CONFIGS = {
-    "DeepLabV3+": {
+    "DeepLabV3+ (ResNet101)": {
         "type": "deeplab",
-        "person_class_index": 15, # COCO数据集中的'person'类别索引
-        "description": "使用 ResNet101 骨干网络的 DeepLabV3"
+        "backbone": "resnet101",
+        "person_class_index": 15,
+        "description": "高精度，显存占用大 (需 >4GB 显存)"
+    },
+    "DeepLabV3+ (MobileNetV3)": {
+        "type": "deeplab",
+        "backbone": "mobilenet_v3_large",
+        "person_class_index": 15,
+        "description": "速度快，显存占用小 (推荐笔记本使用)"
     },
     "U-Net": {
         "type": "unet",

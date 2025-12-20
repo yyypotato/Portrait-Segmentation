@@ -1,5 +1,7 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-                             QLabel, QComboBox, QFileDialog, QFrame, QSizePolicy, QApplication)
+                             QLabel, QComboBox, QFileDialog, QFrame, QSizePolicy, 
+                             QApplication, QMessageBox)
+import torch
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage, QIcon
 from .styles import Styles
@@ -167,8 +169,12 @@ class SegPage(QWidget):
         # 模型选择
         self.combo_model = QComboBox()
         # 【修改点1】将 DeepLabV3+ 放在第一个，作为默认选项
-        self.combo_model.addItems(["DeepLabV3+", "U-Net", "FCN"])
-        self.combo_model.setFixedWidth(120)
+        self.combo_model.addItems([
+            "DeepLabV3+ (MobileNetV3)", # 推荐默认选这个，不容易崩
+            "DeepLabV3+ (ResNet101)", 
+            "U-Net"
+        ])
+        self.combo_model.setFixedWidth(180)
         
         # 【修改点2】强制设置文字颜色 (color)，防止白底白字
         self.combo_model.setStyleSheet("""
@@ -334,9 +340,26 @@ class SegPage(QWidget):
             self.btn_save_result.setEnabled(True)
             self.btn_bg.setEnabled(True)
 
+        except torch.cuda.OutOfMemoryError:
+            # 【新增】专门捕获显存不足错误
+            print("捕获到显存不足错误！")
+            torch.cuda.empty_cache() # 清理显存碎片
+            
+            QMessageBox.critical(
+                self, 
+                "显存不足 (Out of Memory)", 
+                "您的显卡显存不足以运行当前模型。\n\n"
+                "建议方案：\n"
+                "1. 请在下拉框中切换为 'DeepLabV3+ (MobileNetV3)'。\n"
+                "2. 或者尝试使用分辨率较小的图片。"
+            )
+            self.lbl_result.setText("显存不足")
+
         except Exception as e:
+            # 其他错误
             print(f"分割出错: {e}")
-            self.lbl_result.setText(f"出错: {str(e)}")
+            self.lbl_result.setText("运行出错")
+            QMessageBox.warning(self, "错误", f"运行过程中发生错误：\n{str(e)}")
             import traceback
             traceback.print_exc()
 
