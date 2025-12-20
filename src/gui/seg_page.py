@@ -1,13 +1,15 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QLabel, QComboBox, QFileDialog, QFrame, QSizePolicy, 
-                             QApplication, QMessageBox)
+                             QApplication, QMessageBox, QGroupBox, QFormLayout, QSlider) 
 import torch
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QPixmap, QImage, QIcon
 from .styles import Styles
 import cv2
 import numpy as np
 from src.models.factory import ModelFactory
+from src.gui.custom_widgets import InteractiveLabel
+from src.utils.image_processor import ImageProcessor
 
 class SegPage(QWidget):
     go_back = pyqtSignal() # 返回菜单信号
@@ -15,59 +17,114 @@ class SegPage(QWidget):
     def __init__(self):
         super().__init__()
         self.current_image_path = None
-        self.model = None           # 当前加载的模型实例
-        self.current_model_name = "" # 当前加载的模型名称
+        self.model = None
+        self.current_model_name = ""
+        
+        # 数据缓存
+        self.original_rgb = None
+        self.mask_raw = None
+        self.bg_rgb = None
         self.result_rgba = None
+        self.composite_rgb = None
+        
+        # 缩略图缓存 (用于快速预览)
+        self.preview_fg = None
+        self.preview_bg = None
+        self.preview_mask = None
+        self.preview_scale = 1.0
+
+        self.params = {
+            "feather": 0,
+            "brightness": 0,
+            "bg_blur": 0,
+            "roi_rects": []
+        }
+
+        # --- 防抖定时器 (解决卡顿的关键) ---
+        self.update_timer = QTimer()
+        self.update_timer.setSingleShot(True)
+        self.update_timer.setInterval(50) # 50ms 延迟
+        self.update_timer.timeout.connect(self.perform_update)
+
         self.init_ui()
 
     def init_ui(self):
-        # 主布局：垂直方向
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0) # 去除边缘，让顶部栏贴边
+        main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # 1. 顶部导航栏 (左上角返回按钮)
         self.setup_top_bar(main_layout)
 
-        # 2. 主要工作区 (包含三个图像框和中间的操作列)
         content_widget = QWidget()
-        # 给工作区加一个浅灰色的背景，突出中间的白色卡片
-        content_widget.setStyleSheet("background-color: #f5f6fa;") 
+        content_widget.setStyleSheet("background-color: #f5f6fa;")
         content_layout = QHBoxLayout(content_widget)
-        content_layout.setContentsMargins(40, 20, 40, 40)
-        content_layout.setSpacing(20) # 列与列之间的间距
+        content_layout.setContentsMargins(30, 20, 30, 30)
+        content_layout.setSpacing(20)
 
-        # --- 第一列：原始图像 ---
-        col_original = self.create_image_column("原始图像", "btn_upload", "📂 上传图像", self.load_image)
-        self.lbl_original = col_original["label"]
-        self.btn_upload = col_original["btn"]
+        # 1. 原始图像
+        col_orig = self.create_image_column("原始图像", "btn_upload", "📂 上传图像", self.load_image)
+        self.lbl_original = col_orig["label"]
+        self.btn_upload = col_orig["btn"]
 
-        # --- 第二列：处理逻辑 (箭头 + 模型 + 分割) ---
-        col_process = self.create_process_column()
+        # 2. 处理控制
+        col_proc = self.create_process_column()
 
-        # --- 第三列：分割结果 ---
-        col_result = self.create_image_column("分割结果", "btn_save_seg", "💾 保存结果", self.save_result)
-        self.lbl_result = col_result["label"]
-        self.btn_save_result = col_result["btn"]
-        self.btn_save_result.setEnabled(False) # 初始禁用
+        # 3. 分割结果
+        col_res = self.create_image_column("分割结果", "btn_save_seg", "💾 保存透明图", self.save_result)
+        self.lbl_result = col_res["label"]
+        self.btn_save_res = col_res["btn"]
+        self.btn_save_res.setEnabled(False)
 
-        # --- 第四列：合成逻辑 (箭头 + 背景选择) ---
-        col_composite_logic = self.create_composite_logic_column()
+        # --- 4. 场景合成与精修 (合并了原来的逻辑列和显示列) ---
+        col_comp_layout = QVBoxLayout()
+        col_comp_layout.setSpacing(10)
+        
+        # 标题
+        lbl_comp_title = QLabel("场景合成与精修")
+        lbl_comp_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #2f3640;")
+        lbl_comp_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # --- 第五列：场景合成 ---
-        col_composite = self.create_image_column("场景合成", "btn_save_comp", "💾 保存合成", self.save_composite)
-        self.lbl_composite = col_composite["label"]
-        self.btn_save_composite = col_composite["btn"]
-        self.btn_save_composite.setEnabled(False)
+        # 合成预览图 (使用自定义 InteractiveLabel)
+        self.lbl_composite = InteractiveLabel()
+        self.lbl_composite.setFixedSize(350, 400) # 稍微宽一点
+        self.lbl_composite.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_composite.setText("场景合成预览\n(支持鼠标框选虚化)")
+        self.lbl_composite.setStyleSheet("background: white; border: 2px dashed #dcdde1; border-radius: 10px; color: #a4b0be;")
+        self.lbl_composite.selection_made.connect(self.add_roi_blur) # 连接框选信号
 
-        # 将所有列加入布局
-        content_layout.addStretch(1) # 左侧弹簧
-        content_layout.addLayout(col_original["layout"])
-        content_layout.addLayout(col_process)
-        content_layout.addLayout(col_result["layout"])
-        content_layout.addLayout(col_composite_logic)
-        content_layout.addLayout(col_composite["layout"])
-        content_layout.addStretch(1) # 右侧弹簧
+        # 调节面板
+        self.adjust_panel = self.create_adjust_panel()
+        self.adjust_panel.setEnabled(False)
+
+        # 按钮组
+        btn_layout = QHBoxLayout()
+        self.btn_bg = QPushButton("🖼️ 选择背景")
+        self.btn_bg.clicked.connect(self.select_background)
+        self.btn_bg.setEnabled(False)
+        # 复用之前的样式逻辑，或者直接设置
+        self.btn_bg.setStyleSheet("background-color: #6c5ce7; color: white; border-radius: 20px; font-weight: bold; padding: 8px;")
+
+        self.btn_save_comp = QPushButton("💾 保存合成")
+        self.btn_save_comp.clicked.connect(self.save_composite)
+        self.btn_save_comp.setEnabled(False)
+        self.btn_save_comp.setStyleSheet("background-color: #00b894; color: white; border-radius: 20px; font-weight: bold; padding: 8px;")
+
+        btn_layout.addWidget(self.btn_bg)
+        btn_layout.addWidget(self.btn_save_comp)
+
+        col_comp_layout.addWidget(lbl_comp_title)
+        col_comp_layout.addWidget(self.lbl_composite)
+        col_comp_layout.addWidget(self.adjust_panel)
+        col_comp_layout.addLayout(btn_layout)
+        col_comp_layout.addStretch()
+
+        # 添加所有列
+        content_layout.addStretch(1)
+        content_layout.addLayout(col_orig["layout"])
+        content_layout.addLayout(col_proc)
+        content_layout.addLayout(col_res["layout"])
+        content_layout.addLayout(col_comp_layout)
+        content_layout.addStretch(1)
 
         main_layout.addWidget(content_widget)
 
@@ -243,6 +300,78 @@ class SegPage(QWidget):
         
         return layout
 
+    def create_adjust_panel(self):
+        group = QGroupBox("后期参数调整")
+        # 增加高度，防止内容被挤压
+        group.setMinimumHeight(240) 
+        group.setStyleSheet("""
+            QGroupBox { 
+                font-weight: bold; 
+                border: 1px solid #bdc3c7; 
+                border-radius: 8px; 
+                margin-top: 12px; 
+                padding-top: 20px;
+                background-color: white;
+            }
+            QGroupBox::title { 
+                subcontrol-origin: margin; 
+                left: 10px; 
+                padding: 0 5px; 
+                color: #2d3436;
+            }
+            QLabel {
+                color: #636e72;
+                font-size: 12px;
+            }
+        """)
+        
+        layout = QFormLayout()
+        layout.setSpacing(15)
+        layout.setContentsMargins(15, 25, 15, 15)
+
+        def create_slider(min_v, max_v, callback):
+            s = QSlider(Qt.Orientation.Horizontal)
+            s.setRange(min_v, max_v)
+            s.setValue(0)
+            s.setFixedHeight(20)
+            s.setCursor(Qt.CursorShape.PointingHandCursor)
+            # 关键：使用 valueChanged 触发防抖
+            s.valueChanged.connect(callback)
+            return s
+
+        # 1. 边缘羽化 (范围加大)
+        self.slider_feather = create_slider(0, 10, lambda v: self.update_params("feather", v))
+        layout.addRow("边缘柔和:", self.slider_feather)
+
+        # 2. 人像亮度 (范围加大)
+        self.slider_bright = create_slider(-50, 50, lambda v: self.update_params("brightness", v))
+        layout.addRow("人像亮度:", self.slider_bright)
+
+        # 3. 背景虚化 (范围加大)
+        self.slider_blur = create_slider(0, 20, lambda v: self.update_params("bg_blur", v))
+        layout.addRow("背景虚化:", self.slider_blur)
+
+        # 4. 清除按钮 (样式优化)
+        btn_clear = QPushButton("清除局部虚化")
+        btn_clear.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_clear.setFixedHeight(32) # 增加高度
+        btn_clear.setStyleSheet("""
+            QPushButton { 
+                border: 1px solid #b2bec3; 
+                border-radius: 5px; 
+                background: #dfe6e9; 
+                color: #2d3436;
+                font-weight: bold;
+            }
+            QPushButton:hover { background: #b2bec3; }
+            QPushButton:pressed { background: #636e72; color: white; }
+        """)
+        btn_clear.clicked.connect(self.clear_roi)
+        layout.addRow("", btn_clear)
+
+        group.setLayout(layout)
+        return group
+    
     def create_composite_logic_column(self):
         """创建合成逻辑列 (箭头 -> 选择背景)"""
         layout = QVBoxLayout()
@@ -290,16 +419,49 @@ class SegPage(QWidget):
         file_name, _ = QFileDialog.getOpenFileName(self, "选择图片", "", "Images (*.png *.jpg *.jpeg)")
         if file_name:
             self.current_image_path = file_name
-            pixmap = QPixmap(file_name)
+            
+            # 1. 读取并保存原始数据 (处理中文路径)
+            # 这一步非常重要，后续的合成功能依赖 self.original_rgb
+            stream = np.fromfile(file_name, dtype=np.uint8)
+            bgr = cv2.imdecode(stream, cv2.IMREAD_COLOR)
+            self.original_rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            
+            # 2. 显示图片
+            h, w, c = self.original_rgb.shape
+            qimg = QImage(self.original_rgb.data, w, h, w * 3, QImage.Format.Format_RGB888)
+            pixmap = QPixmap.fromImage(qimg)
             self.lbl_original.setPixmap(pixmap.scaled(self.lbl_original.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
             self.lbl_original.setStyleSheet("border: 2px solid #0984e3; border-radius: 10px;") # 选中后边框变蓝
             
-            # 激活分割按钮
+            # 3. 激活分割按钮
             self.btn_run.setEnabled(True)
-            # 重置后续步骤
+            
+            # 4. 重置后续步骤的显示状态
             self.lbl_result.clear()
             self.lbl_result.setText("等待处理...")
+            self.lbl_result.setStyleSheet("border: 2px dashed #dcdde1; background-color: white; color: #a4b0be;")
+            
+            self.lbl_composite.clear()
+            self.lbl_composite.setText("场景合成预览\n(支持鼠标框选虚化)")
+            self.lbl_composite.setStyleSheet("background: white; border: 2px dashed #dcdde1; border-radius: 10px; color: #a4b0be;")
+            
+            # 5. 禁用后续操作按钮
             self.btn_bg.setEnabled(False)
+            self.btn_save_res.setEnabled(False)
+            self.btn_save_comp.setEnabled(False)
+            
+            # 6. 重置调节面板和参数 (防止上一张图的参数残留)
+            self.adjust_panel.setEnabled(False)
+            self.params["roi_rects"] = [] 
+            self.slider_feather.setValue(0)
+            self.slider_bright.setValue(0)
+            self.slider_blur.setValue(0)
+            
+            # 7. 清空数据缓存
+            self.mask_raw = None
+            self.bg_rgb = None
+            self.result_rgba = None
+            self.composite_rgb = None
 
     def run_segmentation(self):
         """执行分割逻辑"""
@@ -343,6 +505,9 @@ class SegPage(QWidget):
             # 返回的是 (H, W) 的掩码，0是背景，255是人像
             mask = self.model.predict(image_rgb,max_size=max_size)
 
+            # 【重要修复】保存原始 mask，否则后续合成功能无法使用！
+            self.mask_raw = mask 
+
             # 5. 后处理：生成透明背景图 (RGBA)
             h, w, c = image_rgb.shape
             rgba_image = np.zeros((h, w, 4), dtype=np.uint8)
@@ -361,7 +526,7 @@ class SegPage(QWidget):
             self.lbl_result.setStyleSheet("border: 2px solid #00b894; border-radius: 10px;") # 变绿表示成功
             
             # 激活后续按钮
-            self.btn_save_result.setEnabled(True)
+            self.btn_save_res.setEnabled(True)
             self.btn_bg.setEnabled(True)
 
         except torch.cuda.OutOfMemoryError:
@@ -388,38 +553,66 @@ class SegPage(QWidget):
             traceback.print_exc()
 
     def select_background(self):
-        """选择背景图并合成"""
-        if self.result_rgba is None:
-            return
+        """选择背景图，并触发首次合成"""
+        path, _ = QFileDialog.getOpenFileName(self, "选择背景", "", "Images (*.png *.jpg *.jpeg)")
+        if path:
+            stream = np.fromfile(path, dtype=np.uint8)
+            bgr = cv2.imdecode(stream, cv2.IMREAD_COLOR)
+            self.bg_rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            
+            # 激活调整面板和保存按钮
+            self.adjust_panel.setEnabled(True)
+            self.btn_save_comp.setEnabled(True)
+            
+            # 执行合成
+            self.update_composite()
 
-        file_name, _ = QFileDialog.getOpenFileName(self, "选择背景图", "", "Images (*.png *.jpg *.jpeg)")
-        if file_name:
-            # 1. 读取背景图
-            bg_stream = np.fromfile(file_name, dtype=np.uint8)
-            bg_bgr = cv2.imdecode(bg_stream, cv2.IMREAD_COLOR)
-            bg_rgb = cv2.cvtColor(bg_bgr, cv2.COLOR_BGR2RGB)
+    # --- 新增以下方法 ---
 
-            # 2. 调整背景图大小以适应前景 (或者反过来，这里选择调整背景适应前景)
-            h, w, _ = self.result_rgba.shape
-            bg_resized = cv2.resize(bg_rgb, (w, h))
+    def update_params(self, key, value):
+        """滑块回调：只更新参数，启动定时器"""
+        self.params[key] = value
+        # 重置定时器，只有当用户停止拖动 50ms 后才真正计算
+        self.update_timer.start()
 
-            # 3. 合成逻辑
-            # 公式: result = foreground * alpha + background * (1 - alpha)
-            alpha = self.result_rgba[:, :, 3] / 255.0
-            alpha = np.expand_dims(alpha, axis=2) # (H, W, 1)
-            
-            foreground = self.result_rgba[:, :, :3]
-            
-            composite = (foreground * alpha + bg_resized * (1.0 - alpha)).astype(np.uint8)
-            
-            # 4. 显示合成结果
-            qimg = QImage(composite.data, w, h, w * 3, QImage.Format.Format_RGB888)
-            self.lbl_composite.setPixmap(QPixmap.fromImage(qimg).scaled(self.lbl_composite.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-            self.lbl_composite.setStyleSheet("border: 2px solid #6c5ce7; border-radius: 10px;")
-            
-            self.btn_save_composite.setEnabled(True)
-            # 保存合成数据用于文件保存
-            self.composite_rgb = composite
+    def perform_update(self):
+        """真正的合成逻辑 (由定时器触发)"""
+        self.update_composite()
+
+    def add_roi_blur(self, rect):
+        if self.composite_rgb is None: return
+        self.params["roi_rects"].append(rect)
+        self.update_composite() # 框选不需要防抖，直接更新
+
+    def clear_roi(self):
+        self.params["roi_rects"] = []
+        self.update_composite()
+
+    def update_composite(self):
+        if self.original_rgb is None or self.mask_raw is None or self.bg_rgb is None: return
+        
+        # 性能优化：如果图片过大 (>1080p)，先生成缩略图进行预览计算？
+        # 这里我们直接调用优化后的 ImageProcessor，它已经够快了
+        
+        self.composite_rgb = ImageProcessor.composite_images(
+            self.original_rgb, 
+            self.mask_raw, 
+            self.bg_rgb,
+            feather=self.params["feather"],
+            brightness=self.params["brightness"],
+            bg_blur=self.params["bg_blur"],
+            roi_rects=self.params["roi_rects"],
+            display_size=(self.lbl_composite.width(), self.lbl_composite.height())
+        )
+        
+        # 显示
+        h, w, c = self.composite_rgb.shape
+        qimg = QImage(self.composite_rgb.data, w, h, w * 3, QImage.Format.Format_RGB888)
+        pix = QPixmap.fromImage(qimg)
+        
+        # 使用 FastTransformation 提升显示速度
+        self.lbl_composite.setPixmap(pix.scaled(self.lbl_composite.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.FastTransformation))
+        self.lbl_composite.setStyleSheet("border: 2px solid #6c5ce7; border-radius: 10px;")
 
     def save_result(self):
         """保存透明背景的分割结果"""
