@@ -83,8 +83,6 @@ https://pytorch.org/get-started/locally/
 pip install -r requirements.txt
 ```
 
-> 若您希望我按“CPU/GPU 两套 requirements”给您拆分出 `requirements-cpu.txt / requirements-gpu.txt`，我可以直接按您当前版本号生成。
-
 ### 3) 运行
 
 在项目根目录执行：
