@@ -1,8 +1,11 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-                             QLabel, QComboBox, QFileDialog, QFrame, QSizePolicy)
+                             QLabel, QComboBox, QFileDialog, QFrame, QSizePolicy, QApplication)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage, QIcon
 from .styles import Styles
+import cv2
+import numpy as np
+from src.models.factory import ModelFactory
 
 class SegPage(QWidget):
     go_back = pyqtSignal() # 返回菜单信号
@@ -10,6 +13,9 @@ class SegPage(QWidget):
     def __init__(self):
         super().__init__()
         self.current_image_path = None
+        self.model = None           # 当前加载的模型实例
+        self.current_model_name = "" # 当前加载的模型名称
+        self.result_rgba = None
         self.init_ui()
 
     def init_ui(self):
@@ -160,14 +166,27 @@ class SegPage(QWidget):
 
         # 模型选择
         self.combo_model = QComboBox()
-        self.combo_model.addItems(["U-Net", "FCN", "DeepLabV3+"])
+        # 【修改点1】将 DeepLabV3+ 放在第一个，作为默认选项
+        self.combo_model.addItems(["DeepLabV3+", "U-Net", "FCN"])
         self.combo_model.setFixedWidth(120)
+        
+        # 【修改点2】强制设置文字颜色 (color)，防止白底白字
         self.combo_model.setStyleSheet("""
             QComboBox {
                 padding: 5px;
                 border: 1px solid #bdc3c7;
                 border-radius: 5px;
                 background: white;
+                color: #2f3640;  /* 关键：强制深色文字 */
+                font-size: 14px;
+            }
+            QComboBox::drop-down {
+                border: 0px;
+            }
+            QComboBox QAbstractItemView {
+                background: white;
+                color: #2f3640;
+                selection-background-color: #dfe6e9;
             }
         """)
 
@@ -261,33 +280,133 @@ class SegPage(QWidget):
             self.btn_bg.setEnabled(False)
 
     def run_segmentation(self):
+        """执行分割逻辑"""
         if not self.current_image_path:
             return
         
-        self.lbl_result.setText("处理中...")
-        # 模拟分割：转灰度
-        pix = QPixmap(self.current_image_path)
-        img = pix.toImage().convertToFormat(QImage.Format.Format_Grayscale8)
-        result_pix = QPixmap.fromImage(img)
+        # 1. 获取用户选择的模型名称
+        selected_model_name = self.combo_model.currentText()
         
-        self.lbl_result.setPixmap(result_pix.scaled(self.lbl_result.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-        self.lbl_result.setStyleSheet("border: 2px solid #00b894; border-radius: 10px;") # 成功变绿
-        
-        self.btn_save_result.setEnabled(True)
-        self.btn_bg.setEnabled(True) # 允许合成背景
+        # 更新界面提示
+        self.lbl_result.setText("正在加载模型...")
+        self.lbl_result.setStyleSheet("border: 2px dashed #dcdde1; background-color: #f5f6fa; color: #636e72;")
+        QApplication.processEvents() # 强制刷新界面，防止卡死
+
+        try:
+            # 2. 获取/切换模型
+            # 如果模型还没加载，或者用户切换了下拉框，就重新创建模型
+            if self.model is None or self.current_model_name != selected_model_name:
+                self.model = ModelFactory.create_model(selected_model_name)
+                self.current_model_name = selected_model_name
+            
+            self.lbl_result.setText("正在推理中...")
+            QApplication.processEvents()
+
+            # 3. 读取图像 (处理中文路径)
+            # 使用 numpy 读取文件流，再用 cv2 解码，可以完美支持中文路径
+            img_stream = np.fromfile(self.current_image_path, dtype=np.uint8)
+            image_bgr = cv2.imdecode(img_stream, cv2.IMREAD_COLOR)
+            # OpenCV 默认是 BGR，模型需要 RGB
+            image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+
+            # 4. 模型推理
+            # 返回的是 (H, W) 的掩码，0是背景，255是人像
+            mask = self.model.predict(image_rgb)
+
+            # 5. 后处理：生成透明背景图 (RGBA)
+            h, w, c = image_rgb.shape
+            rgba_image = np.zeros((h, w, 4), dtype=np.uint8)
+            rgba_image[:, :, :3] = image_rgb # 填充 RGB
+            rgba_image[:, :, 3] = mask       # 填充 Alpha 通道 (掩码)
+
+            # 保存结果数据供后续使用
+            self.result_rgba = rgba_image
+
+            # 6. 显示结果
+            # 注意：QImage 必须保持数据引用，否则会崩溃，所以这里直接转 pixmap
+            qimg = QImage(rgba_image.data, w, h, w * 4, QImage.Format.Format_RGBA8888)
+            result_pix = QPixmap.fromImage(qimg)
+            
+            self.lbl_result.setPixmap(result_pix.scaled(self.lbl_result.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            self.lbl_result.setStyleSheet("border: 2px solid #00b894; border-radius: 10px;") # 变绿表示成功
+            
+            # 激活后续按钮
+            self.btn_save_result.setEnabled(True)
+            self.btn_bg.setEnabled(True)
+
+        except Exception as e:
+            print(f"分割出错: {e}")
+            self.lbl_result.setText(f"出错: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
     def select_background(self):
-        """选择背景图并合成 (模拟)"""
+        """选择背景图并合成"""
+        if self.result_rgba is None:
+            return
+
         file_name, _ = QFileDialog.getOpenFileName(self, "选择背景图", "", "Images (*.png *.jpg *.jpeg)")
         if file_name:
-            # 模拟合成：直接显示背景图
-            bg_pix = QPixmap(file_name)
-            self.lbl_composite.setPixmap(bg_pix.scaled(self.lbl_composite.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-            self.lbl_composite.setStyleSheet("border: 2px solid #6c5ce7; border-radius: 10px;") # 合成变紫
+            # 1. 读取背景图
+            bg_stream = np.fromfile(file_name, dtype=np.uint8)
+            bg_bgr = cv2.imdecode(bg_stream, cv2.IMREAD_COLOR)
+            bg_rgb = cv2.cvtColor(bg_bgr, cv2.COLOR_BGR2RGB)
+
+            # 2. 调整背景图大小以适应前景 (或者反过来，这里选择调整背景适应前景)
+            h, w, _ = self.result_rgba.shape
+            bg_resized = cv2.resize(bg_rgb, (w, h))
+
+            # 3. 合成逻辑
+            # 公式: result = foreground * alpha + background * (1 - alpha)
+            alpha = self.result_rgba[:, :, 3] / 255.0
+            alpha = np.expand_dims(alpha, axis=2) # (H, W, 1)
+            
+            foreground = self.result_rgba[:, :, :3]
+            
+            composite = (foreground * alpha + bg_resized * (1.0 - alpha)).astype(np.uint8)
+            
+            # 4. 显示合成结果
+            qimg = QImage(composite.data, w, h, w * 3, QImage.Format.Format_RGB888)
+            self.lbl_composite.setPixmap(QPixmap.fromImage(qimg).scaled(self.lbl_composite.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            self.lbl_composite.setStyleSheet("border: 2px solid #6c5ce7; border-radius: 10px;")
+            
             self.btn_save_composite.setEnabled(True)
+            # 保存合成数据用于文件保存
+            self.composite_rgb = composite
 
     def save_result(self):
-        print("保存分割结果")
+        """保存透明背景的分割结果"""
+        if self.result_rgba is None:
+            return
+        self._save_image_data(self.result_rgba, "segmentation_result.png", is_rgba=True)
 
     def save_composite(self):
-        print("保存合成结果")
+        """保存合成后的图片"""
+        if not hasattr(self, 'composite_rgb'):
+            return
+        self._save_image_data(self.composite_rgb, "composite_result.jpg", is_rgba=False)
+
+    def _save_image_data(self, img_data, default_name, is_rgba=False):
+        """辅助保存函数"""
+        import os
+        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        output_dir = os.path.join(root_dir, "output")
+        default_path = os.path.join(output_dir, default_name)
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "保存图片", default_path, "PNG Images (*.png);;JPEG Images (*.jpg)"
+        )
+
+        if file_path:
+            # OpenCV 保存需要 BGR 格式
+            if is_rgba:
+                save_img = cv2.cvtColor(img_data, cv2.COLOR_RGBA2BGRA)
+            else:
+                save_img = cv2.cvtColor(img_data, cv2.COLOR_RGB2BGR)
+            
+            # cv2.imencode 支持中文路径保存
+            ext = os.path.splitext(file_path)[1]
+            is_success, im_buf = cv2.imencode(ext, save_img)
+            if is_success:
+                im_buf.tofile(file_path)
+                print(f"保存成功: {file_path}")
