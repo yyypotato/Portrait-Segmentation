@@ -201,14 +201,23 @@ class EditorPage(QWidget):
         self.canvas.set_image(res)
 
     def open_image(self):
-        # ... (保持不变)
-        path, _ = QFileDialog.getOpenFileName(self, "打开图片", "", "Images (*.jpg *.png)")
+        """打开图片 (完整实现)"""
+        path, _ = QFileDialog.getOpenFileName(self, "打开图片", "", "Images (*.jpg *.png *.jpeg *.bmp)")
         if path:
+            # 1. 加载图片到引擎
             img = self.engine.load_image(path)
+            
+            # 2. 显示到画布
             self.canvas.set_image(img)
             self.canvas.fit_in_view()
-            # 重置
-            self.switch_adjust_tool("brightness", self.adjust_btns[0])
+            
+            # 3. 重置 UI 状态
+            # 默认切回调节模式的亮度工具，给用户一个初始状态
+            if hasattr(self, 'adjust_btns') and len(self.adjust_btns) > 0:
+                self.switch_category(1, self.cat_btns[1]) # 切到 Adjust
+                self.switch_adjust_tool("brightness", self.adjust_btns[0]) # 切到 Brightness
+                
+            print(f"已加载图片: {path}")
 
     def save_image(self):
         # ... (保持不变)
