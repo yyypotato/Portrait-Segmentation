@@ -11,6 +11,7 @@ from .crop_overlay import CropOverlay
 from .doodle_overlay import DoodleOverlay
 from .mosaic_overlay import MosaicOverlay
 from .label_overlay import LabelOverlay 
+from .sticker_overlay import StickerOverlay
 import cv2
 import numpy as np
 import os
@@ -121,6 +122,10 @@ class EditorPage(QWidget):
         self.label_overlay = LabelOverlay(self.canvas)
         self.label_overlay.hide()
         
+        # 初始化 StickerOverlay (新增)
+        self.sticker_overlay = StickerOverlay(self.canvas)
+        self.sticker_overlay.hide()
+
         # Bottom Panel
         bottom_panel = QWidget()
         bottom_panel.setFixedHeight(240)
@@ -141,7 +146,8 @@ class EditorPage(QWidget):
         self.sub_tool_stack.addWidget(self.create_doodle_tools()) # 3
         self.sub_tool_stack.addWidget(self.create_mosaic_tools()) # 4
         self.sub_tool_stack.addWidget(self.create_label_tools())  # 5 (新增)
-        for _ in range(2): self.sub_tool_stack.addWidget(QLabel("")) # 调整占位符
+        self.sub_tool_stack.addWidget(self.create_sticker_tools()) # 6 (新增)
+        self.sub_tool_stack.addWidget(QLabel("")) # 调整占位符
 
 
         category_scroll = self.create_scroll_area()
@@ -187,7 +193,69 @@ class EditorPage(QWidget):
                 self.update_mosaic_geometry()
             if not self.label_overlay.isHidden(): # 新增
                 self.update_label_geometry()
+            if not self.sticker_overlay.isHidden(): # 新增
+                self.update_sticker_geometry()
         return super().eventFilter(source, event)
+
+    def create_sticker_tools(self):
+        """创建贴纸工具栏"""
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 使用 TabWidget 分类显示贴纸
+        tab_widget = QTabWidget()
+        # 修改样式：Tab 居中，去掉边框
+        tab_widget.setStyleSheet("""
+            QTabWidget::pane { border: none; }
+            QTabBar::tab { background: transparent; padding: 8px 12px; }
+            QTabBar::tab:selected { background: rgba(255, 255, 255, 0.1); border-radius: 5px; }
+        """)
+        
+        categories = ["time", "location", "food", "drink", "mood", "text"]
+        base_path = os.path.join("resources", "images", "stickers")
+        icon_base_path = os.path.join("resources", "icons") # 假设图标在这里
+        
+        for cat in categories:
+            cat_path = os.path.join(base_path, cat)
+            if not os.path.exists(cat_path): continue
+            
+            scroll = self.create_scroll_area()
+            scroll.setFixedHeight(90)
+            
+            content_widget = QWidget()
+            grid = QHBoxLayout(content_widget) # 使用水平布局横向滚动
+            grid.setSpacing(10)
+            grid.setContentsMargins(10, 5, 10, 5)
+            
+            # 加载贴纸图片
+            images = [f for f in os.listdir(cat_path) if f.endswith(('.png', '.jpg'))]
+            for img_file in images:
+                img_path = os.path.join(cat_path, img_file)
+                btn = QPushButton()
+                btn.setFixedSize(70, 70)
+                btn.setIcon(QIcon(img_path))
+                btn.setIconSize(QSize(60, 60))
+                btn.setStyleSheet("QPushButton { border: none; background: rgba(255,255,255,0.05); border-radius: 5px; } QPushButton:hover { background: rgba(255,255,255,0.15); }")
+                btn.clicked.connect(lambda c, p=img_path: self.sticker_overlay.add_sticker(p))
+                grid.addWidget(btn)
+                
+            grid.addStretch()
+            scroll.setWidget(content_widget)
+            
+            # --- 修改部分：尝试加载图标 ---
+            # 尝试查找 resources/icons/time.png 等
+            icon_path = os.path.join(icon_base_path, f"{cat}.png")
+            if os.path.exists(icon_path):
+                # 如果找到图标，使用图标，不显示文字
+                tab_widget.addTab(scroll, QIcon(icon_path), "")
+            else:
+                # 如果没找到，回退到显示文字
+                tab_widget.addTab(scroll, cat.capitalize())
+            # ---------------------------
+            
+        layout.addWidget(tab_widget)
+        return container
 
     def create_scroll_area(self):
         scroll = QScrollArea()
@@ -505,6 +573,7 @@ class EditorPage(QWidget):
         self.doodle_overlay.hide()
         self.mosaic_overlay.hide()
         self.label_overlay.hide() 
+        self.sticker_overlay.hide()
         self.slider_panel.hide()
         
         if index == 0: # Crop
@@ -544,6 +613,14 @@ class EditorPage(QWidget):
                 self.update_label_geometry()
                 self.show_action_bar("Label", self.save_label, self.cancel_label)
 
+        elif index == 6: # Sticker (新增)
+            img = self.engine.render(use_preview=True, include_crop=True)
+            if img is not None:
+                self.canvas.set_image(img)
+                self.sticker_overlay.show()
+                self.update_sticker_geometry()
+                self.show_action_bar("Sticker", self.save_sticker, self.cancel_sticker)
+
         else: # Adjust, Filter, etc.
             img = self.engine.render(use_preview=True, include_crop=True)
             if img is not None:
@@ -551,6 +628,77 @@ class EditorPage(QWidget):
             self.hide_action_bar()
             
             if index == 1: self.slider_panel.show()
+
+    def update_sticker_geometry(self):
+        if hasattr(self.canvas, 'get_image_rect'):
+            rect = self.canvas.get_image_rect()
+            self.sticker_overlay.set_image_rect(rect)
+        else:
+            self.sticker_overlay.set_image_rect(self.canvas.rect())
+
+    def save_sticker(self):
+        if self.engine.original_image is None:
+            self.cancel_sticker()
+            return
+            
+        # 1. 获取贴纸层图片 (透明背景)
+        sticker_img_qt = self.sticker_overlay.get_result_image(self.sticker_overlay.size())
+        
+        # 2. 转换为 Numpy 格式以便合并
+        ptr = sticker_img_qt.bits()
+        ptr.setsize(sticker_img_qt.height() * sticker_img_qt.width() * 4)
+        arr = np.frombuffer(ptr, np.uint8).reshape((sticker_img_qt.height(), sticker_img_qt.width(), 4))
+        # QImage 是 ARGB 或 RGBA，OpenCV 需要 BGR。这里我们只需要 Alpha 通道做混合
+        sticker_arr = arr.copy() # 拷贝一份
+        
+        # 3. 获取当前底图
+        current_img = self.engine.render(use_preview=True, include_crop=True)
+        if current_img is None: return
+        
+        # 4. 混合 (简单的 Alpha Blending)
+        # 注意：sticker_arr 是 RGBA (Qt) 或 BGRA，取决于系统。通常 QImage.Format_ARGB32_Premultiplied 内存布局是 B G R A
+        # 我们需要确保尺寸一致
+        if sticker_arr.shape[:2] != current_img.shape[:2]:
+            sticker_arr = cv2.resize(sticker_arr, (current_img.shape[1], current_img.shape[0]))
+            
+        # 分离通道
+        b, g, r, a = cv2.split(sticker_arr)
+        overlay_color = cv2.merge((b, g, r))
+        
+        # 归一化 Alpha
+        mask = a / 255.0
+        
+        # 混合
+        # current_img 是 BGR
+        # 确保 current_img 是 float 以便计算
+        src = current_img.astype(float)
+        ovr = overlay_color.astype(float)
+        
+        # 逐通道混合
+        for c in range(3):
+            src[:, :, c] = src[:, :, c] * (1.0 - mask) + ovr[:, :, c] * mask
+            
+        merged_img = src.astype(np.uint8)
+        
+        # 5. 更新 Engine
+        self.engine.preview_image = merged_img
+        # 更新 original_image (需要 resize 回原图尺寸，这里简化处理，直接用 preview 覆盖 original 会导致画质损失，
+        # 严谨做法是在原图尺寸上重新渲染贴纸，但 StickerOverlay 是基于屏幕坐标的。
+        # 这里的折中方案是将 merged_img 放大回原图尺寸，或者接受当前分辨率)
+        self.engine.original_image = cv2.resize(merged_img, 
+                                                (self.engine.original_image.shape[1], self.engine.original_image.shape[0]))
+        
+        self.canvas.set_image(merged_img)
+        self.sticker_overlay.clear()
+        self.sticker_overlay.hide()
+        self.hide_action_bar()
+        self.switch_category(1, self.cat_btns[1])
+
+    def cancel_sticker(self):
+        self.sticker_overlay.clear()
+        self.sticker_overlay.hide()
+        self.hide_action_bar()
+        self.switch_category(1, self.cat_btns[1])
 
     def update_label_geometry(self):
         if hasattr(self.canvas, 'get_image_rect'):

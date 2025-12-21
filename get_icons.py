@@ -5,10 +5,19 @@ import ssl
 # 1. 确保目录存在
 icon_dir = os.path.join("resources", "icons")
 label_dir = os.path.join("resources", "images", "labels") # 新增标签素材目录
+sticker_root = os.path.join("resources", "images", "stickers") # 新增贴纸目录
 
-for d in [icon_dir, label_dir]:
+# 定义贴纸分类
+categories = ["time", "location", "food", "drink", "mood", "text"]
+
+for d in [icon_dir, label_dir, sticker_root]:
     if not os.path.exists(d):
         os.makedirs(d)
+
+for cat in categories:
+    cat_dir = os.path.join(sticker_root, cat)
+    if not os.path.exists(cat_dir):
+        os.makedirs(cat_dir)
 
 # 2. 定义图标映射
 base_url = "https://raw.githubusercontent.com/google/material-design-icons/master/png"
@@ -107,6 +116,15 @@ icons = {
     # --- 操作图标 (已修正路径) ---
     "action_check":   f"{base_url}/navigation/check/materialicons/24dp/2x/baseline_check_black_24dp.png", # 修正: action -> navigation
     "action_close":   f"{base_url}/navigation/close/materialicons/24dp/2x/baseline_close_black_24dp.png",
+
+    # --- 贴纸分类图标 (UI) ---
+    "cat_time":       f"{base_url}/device/access_time/materialicons/24dp/2x/baseline_access_time_black_24dp.png",
+    "cat_location":   f"{base_url}/maps/place/materialicons/24dp/2x/baseline_place_black_24dp.png",
+    "cat_food":       f"{base_url}/maps/restaurant/materialicons/24dp/2x/baseline_restaurant_black_24dp.png",
+    "cat_drink":      f"{base_url}/maps/local_cafe/materialicons/24dp/2x/baseline_local_cafe_black_24dp.png",
+    "cat_mood":       f"{base_url}/social/emoji_emotions/materialicons/24dp/2x/baseline_emoji_emotions_black_24dp.png",
+    "cat_text":       f"{base_url}/editor/title/materialicons/24dp/2x/baseline_title_black_24dp.png",
+
 }
 labels = {
     "bubble_oval": "https://img.icons8.com/ios-filled/100/ffffff/speech-bubble.png",
@@ -114,6 +132,66 @@ labels = {
     "bubble_cloud": "https://img.icons8.com/ios-filled/100/ffffff/thinking-bubble.png", # 修正: thought-bubble -> thinking-bubble
     "bubble_round": "https://img.icons8.com/ios-filled/100/ffffff/chat.png",
 }
+
+# --- 贴纸素材 (彩色图片) ---
+sticker_base = "https://img.icons8.com/color/128"
+stickers = {
+    "time": [
+        ("clock", f"{sticker_base}/clock.png"),
+        ("calendar", f"{sticker_base}/calendar.png"),
+        ("alarm", f"{sticker_base}/alarm-clock.png"),
+        ("watch", f"{sticker_base}/apple-watch.png"), # 修正: watch -> apple-watch
+        ("schedule", f"{sticker_base}/planner.png"), # 修正: schedule -> planner
+        ("sand_watch", f"{sticker_base}/hourglass.png"), # 修正: sand-watch -> hourglass
+        ("time_machine", f"{sticker_base}/time-machine.png"),
+    ],
+    "location": [
+        ("pin", f"{sticker_base}/marker.png"),
+        ("map", f"{sticker_base}/map.png"),
+        ("globe", f"{sticker_base}/globe.png"),
+        ("sign", f"{sticker_base}/signpost.png"),
+        ("navigation", f"{sticker_base}/compass.png"), # 修正: navigation -> compass
+        ("city", f"{sticker_base}/city.png"),
+        ("island", f"{sticker_base}/island-on-water.png"),
+    ],
+    "food": [
+        ("burger", f"{sticker_base}/hamburger.png"),
+        ("pizza", f"{sticker_base}/pizza.png"),
+        ("taco", f"{sticker_base}/taco.png"),
+        ("sushi", f"{sticker_base}/sushi.png"),
+        ("fries", f"{sticker_base}/french-fries.png"),
+        ("donut", f"{sticker_base}/doughnut.png"),
+        ("ice_cream", f"{sticker_base}/ice-cream-cone.png"),
+        ("cake", f"{sticker_base}/cake.png"),
+    ],
+    "drink": [
+        ("coffee", f"{sticker_base}/coffee-to-go.png"),
+        ("tea", f"{sticker_base}/tea-cup.png"),
+        ("cocktail", f"{sticker_base}/cocktail.png"),
+        ("soda", f"{sticker_base}/soda-bottle.png"),
+        ("beer", f"{sticker_base}/beer.png"),
+        ("wine", f"{sticker_base}/wine-glass.png"),
+        ("milk", f"{sticker_base}/milk-bottle.png"),
+    ],
+    "mood": [
+        ("smile", f"{sticker_base}/happy.png"),
+        ("cool", f"{sticker_base}/cool.png"),
+        ("love", f"{sticker_base}/heart-with-arrow.png"),
+        ("star", f"{sticker_base}/star.png"),
+        ("like", f"{sticker_base}/facebook-like.png"),
+        ("fire", f"{sticker_base}/fire-element.png"),
+        ("party", f"{sticker_base}/confetti.png"),
+    ],
+    "text": [
+        ("speech", f"{sticker_base}/speech-bubble.png"),
+        ("chat", f"{sticker_base}/chat.png"),
+        ("quote", f"{sticker_base}/quote-left.png"),
+        ("badge", f"{sticker_base}/badge.png"),
+        ("sale", f"{sticker_base}/sale.png"),
+        ("new", f"{sticker_base}/new.png"),
+    ]
+}
+
 print("开始下载图标...")
 for name, url in icons.items():
     save_path = os.path.join(icon_dir, f"{name}.png")
@@ -137,4 +215,18 @@ for name, url in labels.items():
         except Exception as e:
             print(f"Error {name}: {e}")
 
+print("开始下载贴纸素材...")
+for category, items in stickers.items():
+    cat_path = os.path.join(sticker_root, category)
+    for name, url in items:
+        save_path = os.path.join(cat_path, f"{name}.png")
+        if not os.path.exists(save_path):
+            try:
+                # 伪装 User-Agent 防止 403
+                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req) as response, open(save_path, 'wb') as out_file:
+                    out_file.write(response.read())
+                print(f"Downloaded Sticker [{category}]: {name}")
+            except Exception as e:
+                print(f"Error Sticker [{category}] {name}: {e}")
 print("完成!")
