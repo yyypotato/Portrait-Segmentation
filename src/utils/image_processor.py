@@ -4,8 +4,8 @@ import numpy as np
 class ImageProcessor:
     @staticmethod
     def composite_images(fg_rgb, mask_raw, bg_rgb, 
-                         use_harmonize=False,  # 新增：自动色彩一致
-                         use_light_wrap=False, # 新增：环境光溢出
+                         use_harmonize=False, 
+                         use_light_wrap=False, 
                          brightness=0, 
                          roi_rects=None, 
                          display_size=None):
@@ -18,54 +18,61 @@ class ImageProcessor:
         else:
             bg_resized = bg_rgb
 
-        # 2. 准备前景和 Mask
-        fg = fg_rgb.copy()
+        # 2. 优化 Mask (消除锯齿和白边)
         mask = mask_raw.copy()
-        
-        # 基础羽化 (保留一点点，防止锯齿，但不需要用户调了)
+        # 轻微腐蚀边缘 (1像素)，去掉白边
+        kernel = np.ones((3,3), np.uint8)
+        mask = cv2.erode(mask, kernel, iterations=1)
+        # 轻微模糊，让边缘平滑
         mask = cv2.GaussianBlur(mask, (3, 3), 0)
+        
         alpha = mask.astype(np.float32) / 255.0
         alpha = np.expand_dims(alpha, axis=2)
 
-        # --- 核心改进 A: 自动色彩一致 (Color Harmonization) ---
-        if use_harmonize:
-            # 使用 Reinhard 颜色迁移算法，将背景的色调统计特征应用到前景
-            fg = ImageProcessor.color_transfer(bg_resized, fg)
+        # 3. 准备前景
+        fg = fg_rgb.copy()
 
-        # --- 基础亮度调整 ---
+        # --- 改进 A: 温和的色彩一致 (Color Harmonization) ---
+        if use_harmonize:
+            # 计算环境色
+            harmonized = ImageProcessor.color_transfer(bg_resized, fg)
+            # 关键修改：只应用 50% 的环境色，保留 50% 原本肤色，防止变色太夸张
+            fg = cv2.addWeighted(harmonized, 0.5, fg, 0.5, 0)
+
+        # --- 亮度调整 ---
         if brightness != 0:
             beta = brightness * 2
             lut = np.arange(256, dtype=np.int16) + beta
             lut = np.clip(lut, 0, 255).astype(np.uint8)
             fg = cv2.LUT(fg, lut)
 
-        # --- 合成 ---
+        # --- 基础合成 ---
         fg_float = fg.astype(np.float32)
         bg_float = bg_resized.astype(np.float32)
         
-        # 标准 Alpha 混合
+        # 前景 * alpha + 背景 * (1 - alpha)
         composite = fg_float * alpha + bg_float * (1.0 - alpha)
 
-        # --- 核心改进 B: 环境光溢出 (Light Wrap) ---
+        # --- 改进 B: 自然的环境光溢出 (Light Wrap) ---
         if use_light_wrap:
-            # 逻辑：模糊背景 -> 提取前景边缘 -> 将模糊背景叠加到边缘
-            # 1. 模糊背景
-            bg_blur = cv2.GaussianBlur(bg_resized, (21, 21), 0)
+            # 1. 大范围模糊背景 (模拟漫反射光)
+            bg_blur = cv2.GaussianBlur(bg_resized, (51, 51), 0)
             
-            # 2. 制作边缘 Mask (反转 Mask 后模糊，再与原 Mask 相乘)
+            # 2. 提取边缘区域 (反转Mask -> 模糊 -> 乘回原Mask)
             mask_inv = 255 - mask
-            edge_mask = cv2.GaussianBlur(mask_inv, (15, 15), 0) # 边缘宽度
-            edge_mask = (edge_mask.astype(np.float32) / 255.0) * (mask.astype(np.float32) / 255.0)
-            edge_mask = np.expand_dims(edge_mask, axis=2)
+            edge_mask = cv2.GaussianBlur(mask_inv, (21, 21), 0) # 边缘宽度
+            # 归一化并限制在前景边缘
+            edge_factor = (edge_mask.astype(np.float32) / 255.0) * (mask.astype(np.float32) / 255.0)
+            edge_factor = np.expand_dims(edge_factor, axis=2)
             
-            # 3. 叠加 (Screen 模式或直接加权)
-            # 这里使用简单的加权，让背景光“吃”进前景边缘
-            wrap_layer = bg_blur.astype(np.float32)
-            composite = composite * (1.0 - edge_mask * 0.6) + wrap_layer * (edge_mask * 0.6)
+            # 3. 叠加光效 (使用 Add 模式，让边缘变亮变暖)
+            # 强度设为 0.7
+            light_layer = bg_blur.astype(np.float32) * edge_factor * 0.7
+            composite = cv2.add(composite, light_layer)
 
         composite = np.clip(composite, 0, 255).astype(np.uint8)
 
-        # --- 局部虚化 (保持不变) ---
+        # --- 局部虚化 ---
         if roi_rects and display_size:
             disp_w, disp_h = display_size
             scale_x = w / disp_w
@@ -84,35 +91,22 @@ class ImageProcessor:
 
     @staticmethod
     def color_transfer(source, target):
-        """
-        Reinhard 颜色迁移算法：让 target(前景) 拥有 source(背景) 的色调
-        """
-        # 转换到 LAB 空间 (L=亮度, A=红绿, B=黄蓝)
+        """Reinhard 颜色迁移 (保持不变)"""
         source_lab = cv2.cvtColor(source, cv2.COLOR_RGB2LAB).astype(np.float32)
         target_lab = cv2.cvtColor(target, cv2.COLOR_RGB2LAB).astype(np.float32)
 
-        # 计算均值和标准差
         src_mean, src_std = cv2.meanStdDev(source_lab)
         tgt_mean, tgt_std = cv2.meanStdDev(target_lab)
 
-        src_mean = src_mean.flatten()
-        src_std = src_std.flatten()
-        tgt_mean = tgt_mean.flatten()
-        tgt_std = tgt_std.flatten()
-
-        # 避免除零
+        src_mean = src_mean.flatten(); src_std = src_std.flatten()
+        tgt_mean = tgt_mean.flatten(); tgt_std = tgt_std.flatten()
         tgt_std[tgt_std == 0] = 1e-5
 
-        # 核心公式：(x - mean_tgt) * (std_src / std_tgt) + mean_src
-        # 但为了不让肤色变得太奇怪，我们通常减弱 L 通道(亮度)的影响，主要迁移 A/B 通道(色调)
-        
         res_lab = target_lab.copy()
-        
-        # L 通道 (亮度)：只迁移 50% 的特征，保留原图光影
+        # L通道只迁移 50%
         l_scale = src_std[0] / tgt_std[0]
         res_lab[:,:,0] = (target_lab[:,:,0] - tgt_mean[0]) * l_scale * 0.5 + src_mean[0] * 0.5 + tgt_mean[0] * 0.5
         
-        # A/B 通道 (色度)：完全迁移
         for i in range(1, 3):
             scale = src_std[i] / tgt_std[i]
             res_lab[:,:,i] = (target_lab[:,:,i] - tgt_mean[i]) * scale + src_mean[i]

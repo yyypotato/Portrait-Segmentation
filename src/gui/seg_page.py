@@ -305,8 +305,27 @@ class SegPage(QWidget):
         group = QGroupBox("智能合成控制")
         group.setMinimumHeight(200)
         group.setStyleSheet("""
-            QGroupBox { font-weight: bold; border: 1px solid #bdc3c7; border-radius: 8px; margin-top: 12px; padding-top: 20px; background: white; }
-            QCheckBox { font-size: 14px; padding: 5px; }
+            QGroupBox { 
+                font-weight: bold; 
+                border: 1px solid #bdc3c7; 
+                border-radius: 8px; 
+                margin-top: 12px; 
+                padding-top: 20px; 
+                background: white; 
+                color: #2d3436; /* 强制标题颜色为深灰 */
+                font-size: 14px;
+            }
+            QCheckBox { 
+                font-size: 14px; 
+                padding: 5px; 
+                color: #2d3436; /* 强制复选框文字颜色 */
+                font-weight: bold;
+            }
+            QLabel {
+                color: #2d3436; /* 强制标签文字颜色 */
+                font-weight: bold;
+                font-size: 13px;
+            }
             QCheckBox::indicator { width: 20px; height: 20px; }
         """)
         
