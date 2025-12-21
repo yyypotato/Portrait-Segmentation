@@ -1,6 +1,7 @@
 from PyQt6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QFrame 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QRectF
 from PyQt6.QtGui import QPixmap, QImage, QPainter
+import numpy as np
 
 class EditorCanvas(QGraphicsView):
     """
@@ -25,12 +26,37 @@ class EditorCanvas(QGraphicsView):
     def set_image(self, img_array):
         """设置显示的 numpy 图片"""
         if img_array is None: return
+        
+        # 1. 确保内存连续 (OpenCV 有时返回非连续内存，会导致显示错乱)
+        img_array = np.ascontiguousarray(img_array)
+        
         h, w, c = img_array.shape
-        bytes_per_line = 3 * w
-        qimg = QImage(img_array.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+        bytes_per_line = c * w
+        
+        # 2. 转换数据类型 [关键修复]
+        # PyQt6 QImage 不接受 memoryview，必须转为 bytes
+        # .tobytes() 会创建数据副本，虽然有微小开销但能保证类型安全且防止崩溃
+        qimg = QImage(img_array.data.tobytes(), w, h, bytes_per_line, QImage.Format.Format_RGB888)
+        
         pixmap = QPixmap.fromImage(qimg)
         self.pixmap_item.setPixmap(pixmap)
         self.scene.setSceneRect(0, 0, w, h)
+
+    def get_image_rect(self):
+        """
+        获取图片在 View 坐标系中的实际显示区域
+        供 CropOverlay 使用，确保裁剪框紧贴图片
+        """
+        if self.pixmap_item.pixmap().isNull():
+            return QRectF()
+            
+        # 1. 获取 Item 在 Scene 中的边界
+        item_rect_scene = self.pixmap_item.sceneBoundingRect()
+        
+        # 2. 将 Scene 坐标映射回 View (窗口) 坐标
+        # mapFromScene 返回的是 QPolygon，需要取 boundingRect
+        view_poly = self.mapFromScene(item_rect_scene)
+        return view_poly.boundingRect().toRectF()
 
     def fit_in_view(self):
         """自适应窗口大小"""

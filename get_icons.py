@@ -73,7 +73,17 @@ icons = {
     "ratio_3_4":      f"{base_url}/image/crop_portrait/materialicons/24dp/2x/baseline_crop_portrait_black_24dp.png",
     "ratio_4_3":      f"{base_url}/image/crop_landscape/materialicons/24dp/2x/baseline_crop_landscape_black_24dp.png",
     "ratio_16_9":     f"{base_url}/hardware/desktop_mac/materialicons/24dp/2x/baseline_desktop_mac_black_24dp.png", # 暂代
-
+    # --- 涂鸦工具图标 (已修正路径) ---
+    "doodle_eraser":  f"{base_url}/action/delete/materialicons/24dp/2x/baseline_delete_black_24dp.png",
+    "doodle_curve":   f"{base_url}/content/gesture/materialicons/24dp/2x/baseline_gesture_black_24dp.png", # 修正: image -> content
+    "doodle_arrow":   f"{base_url}/action/trending_flat/materialicons/24dp/2x/baseline_trending_flat_black_24dp.png",
+    "doodle_line":    f"{base_url}/content/remove/materialicons/24dp/2x/baseline_remove_black_24dp.png", # 修正: editor -> content
+    "doodle_rect":    f"{base_url}/image/crop_square/materialicons/24dp/2x/baseline_crop_square_black_24dp.png",
+    "doodle_circle":  f"{base_url}/image/panorama_fish_eye/materialicons/24dp/2x/baseline_panorama_fish_eye_black_24dp.png",
+    
+    # --- 操作图标 (已修正路径) ---
+    "action_check":   f"{base_url}/navigation/check/materialicons/24dp/2x/baseline_check_black_24dp.png", # 修正: action -> navigation
+    "action_close":   f"{base_url}/navigation/close/materialicons/24dp/2x/baseline_close_black_24dp.png",
 }
 
 print(f"开始下载图标到 {save_dir} ...")

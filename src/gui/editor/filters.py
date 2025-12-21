@@ -1,208 +1,193 @@
 import cv2
 import numpy as np
 
-class FilterManager:
-    """
-    滤镜管理器
-    提供多种风格的滤镜算法
-    """
+def _adjust_saturation(img, saturation_scale):
+    """辅助函数：调整饱和度"""
+    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV).astype(np.float32)
+    hsv[:, :, 1] *= saturation_scale
+    hsv[:, :, 1] = np.clip(hsv[:, :, 1], 0, 255)
+    return cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
+
+def _apply_vignette(img, strength=0.5):
+    """辅助函数：添加暗角"""
+    rows, cols = img.shape[:2]
+    # 生成高斯核
+    kernel_x = cv2.getGaussianKernel(cols, cols/2)
+    kernel_y = cv2.getGaussianKernel(rows, rows/2)
+    kernel = kernel_y * kernel_x.T
+    mask = kernel / kernel.max()
     
-    @staticmethod
-    def apply_filter(img, filter_name):
-        if filter_name == "original":
-            return img
-        
-        # 获取滤镜函数
-        method_name = f"_filter_{filter_name}"
-        if hasattr(FilterManager, method_name):
-            return getattr(FilterManager, method_name)(img)
+    # 调整暗角强度
+    mask = mask * (1 - strength) + strength
+    mask = np.dstack([mask] * 3)
+    
+    return np.clip(img * mask, 0, 255).astype(np.uint8)
+
+def _apply_curve(img, x_points, y_points):
+    """辅助函数：模拟曲线调整 (使用LUT)"""
+    # 创建查找表
+    lut = np.interp(np.arange(256), x_points, y_points).astype(np.uint8)
+    return cv2.LUT(img, lut)
+
+def apply_filter(img, filter_name):
+    """
+    应用滤镜效果
+    :param img: 输入图像 (RGB numpy array, uint8)
+    :param filter_name: 滤镜名称
+    :return: 处理后的图像 (RGB numpy array, uint8)
+    """
+    if filter_name == "original" or filter_name == "f_original":
         return img
 
-    # --- 基础工具函数 ---
-    @staticmethod
-    def _apply_lut(img, curve_b, curve_g, curve_r):
-        """应用通道曲线"""
-        lut = np.zeros((256, 1, 3), dtype=np.uint8)
-        lut[:, 0, 0] = np.clip(curve_b, 0, 255)
-        lut[:, 0, 1] = np.clip(curve_g, 0, 255)
-        lut[:, 0, 2] = np.clip(curve_r, 0, 255)
-        return cv2.LUT(img, lut)
+    # ---------------------------------------------------------
+    # 1. 特殊算法类滤镜 (不基于简单的 RGB 调整)
+    # ---------------------------------------------------------
 
-    @staticmethod
-    def _color_overlay(img, color, intensity=0.2):
-        """叠加颜色层"""
-        overlay = np.full(img.shape, color, dtype=np.uint8)
-        return cv2.addWeighted(img, 1 - intensity, overlay, intensity, 0)
+    if filter_name == "f_demist":
+        # 【去雾优化】：使用 CLAHE (限制对比度自适应直方图均衡化)
+        # 转换到 LAB 空间，只处理 L (亮度) 通道
+        lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
+        l, a, b = cv2.split(lab)
+        
+        # 创建 CLAHE 对象 (clipLimit 控制对比度限制，tileGridSize 控制局部大小)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        cl = clahe.apply(l)
+        
+        # 合并并转回 RGB
+        limg = cv2.merge((cl, a, b))
+        res = cv2.cvtColor(limg, cv2.COLOR_LAB2RGB)
+        
+        # 稍微增加一点饱和度以补偿去雾后的色彩
+        return _adjust_saturation(res, 1.1)
 
-    # --- 具体滤镜实现 ---
-
-    @staticmethod
-    def _filter_classic(img):
-        # 经典：微暖，稍高对比度
-        x = np.arange(256)
-        return FilterManager._apply_lut(img, x*0.95, x, x*1.05)
-
-    @staticmethod
-    def _filter_dawn(img):
-        # 晨光：紫色调阴影，暖色高光
-        return FilterManager._color_overlay(img, (100, 80, 120), 0.15)
-
-    @staticmethod
-    def _filter_pure(img):
-        # 纯净：略微降低饱和度，提高亮度
-        hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV).astype(np.float32)
-        hsv[:, :, 1] *= 0.8 # 降饱和
-        hsv[:, :, 2] *= 1.1 # 提亮
-        hsv = np.clip(hsv, 0, 255).astype(np.uint8)
-        return cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
-
-    @staticmethod
-    def _filter_mono(img):
-        # 黑白
+    elif filter_name == "f_mono":
+        # 【黑白】：标准灰度
         gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
         return cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
 
-    @staticmethod
-    def _filter_metallic(img):
-        # 金属：高对比度黑白
+    elif filter_name == "f_individuality":
+        # 【个性优化】：Bleach Bypass (跳过漂白) 风格
+        # 特点：高对比度，低饱和度，银色质感
         gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-        gray = cv2.equalizeHist(gray)
-        return cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
-
-    @staticmethod
-    def _filter_blue(img):
-        # 蓝调
-        return FilterManager._color_overlay(img, (255, 100, 0), 0.2) # BGR: Blue is first channel in overlay logic if using BGR, but here input is RGB. 
-        # Note: Input img is RGB. Overlay color should be RGB. (0, 100, 255) for Blue.
-        # Let's stick to RGB logic.
-        return FilterManager._color_overlay(img, (0, 100, 255), 0.15)
-
-    @staticmethod
-    def _filter_cool(img):
-        # 清凉：偏青色
-        x = np.arange(256)
-        return FilterManager._apply_lut(img, x*1.1, x*1.05, x*0.9) # B, G, R (RGB order: R is last) -> R=0.9, G=1.05, B=1.1
-
-    @staticmethod
-    def _filter_netural(img):
-        # 中性：低对比度
-        img_float = img.astype(np.float32)
-        return np.clip((img_float - 128) * 0.8 + 128, 0, 255).astype(np.uint8)
-
-    @staticmethod
-    def _filter_blossom(img):
-        # 桃花：粉色调
-        return FilterManager._color_overlay(img, (255, 180, 200), 0.15)
-
-    @staticmethod
-    def _filter_fair(img):
-        # 白皙：提亮肤色 (简单提亮)
-        img_float = img.astype(np.float32)
-        return np.clip(img_float * 1.1 + 10, 0, 255).astype(np.uint8)
-
-    @staticmethod
-    def _filter_pink(img):
-        # 粉嫩
-        return FilterManager._color_overlay(img, (255, 192, 203), 0.2)
-
-    @staticmethod
-    def _filter_caramel(img):
-        # 焦糖：棕褐色
-        sepia_filter = np.array([[0.393, 0.769, 0.189],
-                                 [0.349, 0.686, 0.168],
-                                 [0.272, 0.534, 0.131]])
-        img_sepia = cv2.transform(img, sepia_filter)
-        return np.clip(img_sepia, 0, 255).astype(np.uint8)
-
-    @staticmethod
-    def _filter_soft(img):
-        # 柔和：高斯模糊叠加
-        blur = cv2.GaussianBlur(img, (15, 15), 0)
-        return cv2.addWeighted(img, 0.7, blur, 0.3, 0)
-
-    @staticmethod
-    def _filter_impact(img):
-        # 冲击：高对比度，高饱和
-        hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV).astype(np.float32)
-        hsv[:, :, 1] *= 1.3
-        hsv = np.clip(hsv, 0, 255).astype(np.uint8)
-        img_sat = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+        gray = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
         
-        img_float = img_sat.astype(np.float32)
-        return np.clip((img_float - 128) * 1.3 + 128, 0, 255).astype(np.uint8)
-
-    @staticmethod
-    def _filter_moody(img):
-        # 情绪：暗调，低饱和
-        hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV).astype(np.float32)
-        hsv[:, :, 1] *= 0.6 # 降饱和
-        hsv[:, :, 2] *= 0.8 # 降亮度
-        hsv = np.clip(hsv, 0, 255).astype(np.uint8)
-        return cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
-
-    @staticmethod
-    def _filter_valencia(img):
-        # 瓦伦西亚：暖色，褪色感
-        x = np.arange(256)
-        img = FilterManager._apply_lut(img, x*0.9, x, x*1.1) # 提红
-        return np.clip(img.astype(np.float32) + 20, 0, 255).astype(np.uint8) # 整体提亮
-
-    @staticmethod
-    def _filter_memory(img):
-        # 回忆：绿色调，低对比
-        return FilterManager._color_overlay(img, (100, 120, 80), 0.2)
-
-    @staticmethod
-    def _filter_vintage(img):
-        # 复古：黄色调，暗角 (暗角在 processor 中有单独实现，这里只做色调)
-        return FilterManager._color_overlay(img, (240, 230, 140), 0.2)
-
-    @staticmethod
-    def _filter_childhood(img):
-        # 童年：暖洋洋
-        return FilterManager._color_overlay(img, (255, 220, 180), 0.15)
-
-    @staticmethod
-    def _filter_halo(img):
-        # 光晕：中心亮
-        rows, cols = img.shape[:2]
-        # 简单模拟：整体提亮 + 边缘压暗（类似暗角反向）
-        return np.clip(img.astype(np.float32) * 1.1, 0, 255).astype(np.uint8)
-
-    @staticmethod
-    def _filter_sweet(img):
-        # 甜美：粉紫
-        return FilterManager._color_overlay(img, (255, 200, 255), 0.15)
-
-    @staticmethod
-    def _filter_handsome(img):
-        # 帅气：冷色调，高对比
-        x = np.arange(256)
-        img = FilterManager._apply_lut(img, x*1.1, x*1.0, x*0.95)
-        img_float = img.astype(np.float32)
-        return np.clip((img_float - 128) * 1.1 + 128, 0, 255).astype(np.uint8)
-
-    @staticmethod
-    def _filter_sentimental(img):
-        # 感性：黑白+噪点 (简化为低饱和度)
-        hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV).astype(np.float32)
-        hsv[:, :, 1] *= 0.3
-        hsv = np.clip(hsv, 0, 255).astype(np.uint8)
-        return cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
-
-    @staticmethod
-    def _filter_individuality(img):
-        # 个性：反转色 (负片)
-        return 255 - img
-
-    @staticmethod
-    def _filter_demist(img):
-        # 去雾：简单模拟（提高对比度，降低亮度，增加饱和度）
-        hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV).astype(np.float32)
-        hsv[:, :, 1] *= 1.2 # 增加饱和
-        hsv = np.clip(hsv, 0, 255).astype(np.uint8)
-        img = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+        # 混合原图和灰度图 (叠加模式 Overlay 模拟)
+        img_f = img.astype(np.float32) / 255.0
+        gray_f = gray.astype(np.float32) / 255.0
         
-        # 增加对比度
-        img_float = img.astype(np.float32)
-        return np.clip((img_float - 128) * 1.2 + 128, 0, 255).astype(np.uint8)
+        # Overlay blending logic
+        mask = img_f < 0.5
+        res = np.zeros_like(img_f)
+        res[mask] = 2 * img_f[mask] * gray_f[mask]
+        res[~mask] = 1 - 2 * (1 - img_f[~mask]) * (1 - gray_f[~mask])
+        
+        res = np.clip(res * 255, 0, 255).astype(np.uint8)
+        # 降低饱和度
+        return _adjust_saturation(res, 0.6)
+
+    elif filter_name == "f_classic":
+        # 【经典】：Sepia 怀旧色矩阵
+        img_f = img.astype(np.float32)
+        kernel = np.array([[0.272, 0.534, 0.131],
+                           [0.349, 0.686, 0.168],
+                           [0.393, 0.769, 0.189]])
+        sepia = cv2.transform(img_f, kernel)
+        return np.clip(sepia, 0, 255).astype(np.uint8)
+
+    elif filter_name == "f_vintage":
+        # 【复古】：暖色 + 暗角 + 降低对比度
+        res = _adjust_saturation(img, 0.8)
+        # 提升红色和绿色 (变黄)
+        lut_r = np.interp(np.arange(256), [0, 255], [20, 235]).astype(np.uint8)
+        lut_b = np.interp(np.arange(256), [0, 255], [0, 215]).astype(np.uint8) # 蓝色压暗
+        res[:,:,0] = cv2.LUT(res[:,:,0], lut_r)
+        res[:,:,2] = cv2.LUT(res[:,:,2], lut_b)
+        return _apply_vignette(res, 0.6)
+
+    # ---------------------------------------------------------
+    # 2. 调色类滤镜 (基于 LUT 曲线和通道混合)
+    # ---------------------------------------------------------
+    
+    # 准备工作：转为 float 方便计算，或者直接操作 LUT
+    # 这里为了性能和效果平衡，混合使用
+    
+    res = img.copy()
+
+    if filter_name == "f_dawn":
+        # 【晨光】：低对比度，紫色/洋红倾向
+        res = cv2.addWeighted(res, 1.1, np.zeros_like(res), 0, 10) # 提亮
+        res[:,:,0] = cv2.LUT(res[:,:,0], np.arange(256).astype(np.uint8)) # R
+        res[:,:,1] = cv2.LUT(res[:,:,1], np.interp(np.arange(256), [0, 255], [0, 230]).astype(np.uint8)) # G 减少
+        res[:,:,2] = cv2.LUT(res[:,:,2], np.interp(np.arange(256), [0, 255], [20, 255]).astype(np.uint8)) # B 增加 (暗部偏蓝)
+
+    elif filter_name == "f_pure":
+        # 【纯净】：冷色调，高亮度
+        res = _adjust_saturation(res, 0.9)
+        res[:,:,2] = cv2.LUT(res[:,:,2], np.interp(np.arange(256), [0, 128, 255], [0, 138, 255]).astype(np.uint8)) # 提升蓝色中间调
+
+    elif filter_name == "f_metallic":
+        # 【金属】：极高对比度，极低饱和度
+        res = _adjust_saturation(res, 0.3)
+        # S型曲线增加对比度
+        lut = np.interp(np.arange(256), [0, 64, 192, 255], [0, 40, 215, 255]).astype(np.uint8)
+        res = cv2.LUT(res, lut)
+
+    elif filter_name == "f_blue":
+        # 【蓝调】：强烈的蓝色滤镜
+        res[:,:,2] = cv2.LUT(res[:,:,2], np.interp(np.arange(256), [0, 255], [40, 255]).astype(np.uint8))
+
+    elif filter_name == "f_cool":
+        # 【清凉】：青色调 (减红，加蓝绿)
+        res[:,:,0] = cv2.LUT(res[:,:,0], np.interp(np.arange(256), [0, 255], [0, 230]).astype(np.uint8))
+
+    elif filter_name == "f_pink":
+        # 【粉嫩】：增加红色和蓝色，提亮
+        res[:,:,1] = cv2.LUT(res[:,:,1], np.interp(np.arange(256), [0, 255], [0, 240]).astype(np.uint8)) # 减绿
+        res = cv2.addWeighted(res, 1.05, np.zeros_like(res), 0, 5)
+
+    elif filter_name in ["f_soft", "f_fair", "f_netural"]:
+        # 【柔和/白皙】：模拟柔光镜 (Glow)
+        # 高斯模糊后与原图混合
+        blur = cv2.GaussianBlur(res, (0, 0), 5)
+        res = cv2.addWeighted(res, 0.7, blur, 0.3, 10)
+        # 稍微提亮
+        res = _adjust_saturation(res, 0.9)
+
+    elif filter_name in ["f_impact", "f_halo"]:
+        # 【冲击】：强对比度，高饱和
+        res = _adjust_saturation(res, 1.3)
+        lut = np.interp(np.arange(256), [0, 80, 175, 255], [0, 50, 205, 255]).astype(np.uint8)
+        res = cv2.LUT(res, lut)
+
+    elif filter_name == "f_moody":
+        # 【情绪】：暗调，低饱和
+        res = _adjust_saturation(res, 0.7)
+        res = cv2.addWeighted(res, 0.8, np.zeros_like(res), 0, 0) # 压暗
+
+    elif filter_name in ["f_blossom", "f_sweet"]:
+        # 【桃花/甜美】：暖粉色
+        lut_r = np.interp(np.arange(256), [0, 255], [10, 255]).astype(np.uint8)
+        res[:,:,0] = cv2.LUT(res[:,:,0], lut_r)
+
+    elif filter_name in ["f_caramel", "f_valencia"]:
+        # 【焦糖】：暖黄，褪色感
+        res[:,:,2] = cv2.LUT(res[:,:,2], np.interp(np.arange(256), [0, 255], [0, 220]).astype(np.uint8)) # 减蓝
+        res = cv2.addWeighted(res, 1.0, np.array([[[20, 10, 0]]], dtype=np.uint8), 0.1, 0) # 叠加暖色层
+
+    elif filter_name == "f_memory":
+        # 【回忆】：褪色黑 (Lifted Blacks)
+        lut = np.interp(np.arange(256), [0, 40, 255], [30, 50, 255]).astype(np.uint8)
+        res = cv2.LUT(res, lut)
+        res[:,:,2] = cv2.LUT(res[:,:,2], np.interp(np.arange(256), [0, 255], [0, 230]).astype(np.uint8)) # 偏黄
+
+    elif filter_name == "f_childhood":
+        # 【童年】：高饱和，偏暖
+        res = _adjust_saturation(res, 1.2)
+        res = cv2.addWeighted(res, 1.05, np.zeros_like(res), 0, 0)
+
+    elif filter_name in ["f_handsome", "f_sentimental"]:
+        # 【帅气/感性】：冷色，低对比
+        res = _adjust_saturation(res, 0.8)
+        res[:,:,0] = cv2.LUT(res[:,:,0], np.interp(np.arange(256), [0, 255], [0, 230]).astype(np.uint8)) # 减红
+
+    return res

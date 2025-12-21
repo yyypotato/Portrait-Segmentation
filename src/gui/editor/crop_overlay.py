@@ -3,73 +3,94 @@ from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal
 from PyQt6.QtGui import QPainter, QPen, QColor, QRegion
 
 class CropOverlay(QWidget):
-    """
-    覆盖在 Canvas 上的裁剪框控件
-    """
-    crop_changed = pyqtSignal(QRectF) # 发送归一化的裁剪区域 (0-1)
+    crop_changed = pyqtSignal(QRectF) 
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        # 允许鼠标事件穿透到自身，但不穿透到下面的 Canvas (除非在裁剪框外)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         self.setMouseTracking(True)
         
-        # 归一化坐标 (0.0 - 1.0)，相对于显示的图片区域
-        self.norm_rect = QRectF(0.1, 0.1, 0.8, 0.8) # 默认给一点边距
-        
-        # 实际显示的图片区域 (由 Canvas 设置)
+        # 归一化坐标 (0.0 - 1.0)
+        self.norm_rect = QRectF(0.0, 0.0, 1.0, 1.0) 
         self.image_rect = QRectF()
         
-        # 交互状态
         self.dragging = False
         self.drag_mode = None 
         self.last_pos = QPointF()
         self.aspect_ratio = None 
 
-        self.handle_size = 30 # 增大触控区域
-        self.corner_line_len = 20
-
     def set_image_rect(self, rect):
-        """设置图片在控件中的实际显示区域"""
         if rect is None or rect.isEmpty():
             self.image_rect = QRectF()
             self.hide()
             return
-        
         self.image_rect = rect
         self.show()
         self.update()
 
+    def reset_crop(self):
+        """重置为全图"""
+        self.norm_rect = QRectF(0.0, 0.0, 1.0, 1.0)
+        self.aspect_ratio = None
+        self.crop_changed.emit(self.norm_rect)
+        self.update()
+
     def set_aspect_ratio(self, ratio):
-        """设置宽高比 (float), None 为自由"""
+        """设置比例并计算最大居中矩形"""
         self.aspect_ratio = ratio
-        self._fix_aspect_ratio()
+        
+        if self.image_rect.isEmpty(): return
+
+        if ratio is None:
+            # 自由模式，不改变当前框，只解除限制
+            pass
+        else:
+            # 计算基于当前图片尺寸的最大居中矩形
+            img_w = self.image_rect.width()
+            img_h = self.image_rect.height()
+            
+            if img_w == 0 or img_h == 0: return
+
+            # 目标宽高
+            target_w = img_w
+            target_h = target_w / ratio
+            
+            if target_h > img_h:
+                target_h = img_h
+                target_w = target_h * ratio
+            
+            # 转换为归一化坐标
+            norm_w = target_w / img_w
+            norm_h = target_h / img_h
+            
+            # 居中
+            norm_x = (1.0 - norm_w) / 2.0
+            norm_y = (1.0 - norm_h) / 2.0
+            
+            self.norm_rect = QRectF(norm_x, norm_y, norm_w, norm_h)
+            self.crop_changed.emit(self.norm_rect)
+            
         self.update()
 
     def _fix_aspect_ratio(self):
-        # 修复 ZeroDivisionError：如果图片区域无效，直接返回
+        """拖拽时维持比例"""
         if self.aspect_ratio is None: return
-        if self.image_rect.isEmpty() or self.image_rect.height() == 0: return
+        if self.image_rect.isEmpty(): return
         
-        # 获取当前像素坐标
         current_w = self.norm_rect.width() * self.image_rect.width()
         current_h = self.norm_rect.height() * self.image_rect.height()
         
-        if current_h == 0: return # 双重保险
+        if current_h == 0: return
 
         center = self.norm_rect.center()
         
-        # 保持面积近似，调整宽高
         if current_w / current_h > self.aspect_ratio:
-            # 太宽，缩减宽度
             new_w = current_h * self.aspect_ratio
             new_h = current_h
         else:
-            # 太高，缩减高度
             new_w = current_w
             new_h = current_w / self.aspect_ratio
             
-        # 转回归一化
         norm_w = new_w / self.image_rect.width()
         norm_h = new_h / self.image_rect.height()
         
@@ -77,7 +98,6 @@ class CropOverlay(QWidget):
         self._constrain_rect()
 
     def _constrain_rect(self):
-        """限制裁剪框在图片范围内"""
         r = self.norm_rect
         if r.left() < 0: r.moveLeft(0)
         if r.top() < 0: r.moveTop(0)
@@ -87,7 +107,6 @@ class CropOverlay(QWidget):
         self.crop_changed.emit(self.norm_rect)
 
     def get_pixel_rect(self):
-        """获取屏幕像素坐标下的裁剪框"""
         if self.image_rect.isEmpty(): return QRectF()
         x = self.image_rect.x() + self.norm_rect.x() * self.image_rect.width()
         y = self.image_rect.y() + self.norm_rect.y() * self.image_rect.height()
@@ -104,21 +123,21 @@ class CropOverlay(QWidget):
         full_rect = self.rect()
         crop_pixel_rect = self.get_pixel_rect()
         
-        # 1. 绘制半透明遮罩 (挖空中间)
+        # 遮罩
         bg_region = QRegion(full_rect)
         crop_region = QRegion(crop_pixel_rect.toRect())
         mask_region = bg_region.subtracted(crop_region)
         
         painter.setClipRegion(mask_region)
-        painter.fillRect(full_rect, QColor(0, 0, 0, 180)) # 加深背景遮罩
+        painter.fillRect(full_rect, QColor(0, 0, 0, 180))
         painter.setClipRect(full_rect) 
 
-        # 2. 绘制裁剪框边框
+        # 边框
         pen = QPen(QColor(255, 255, 255), 1)
         painter.setPen(pen)
         painter.drawRect(crop_pixel_rect)
 
-        # 3. 绘制九宫格线
+        # 九宫格
         pen_grid = QPen(QColor(255, 255, 255, 80), 1)
         painter.setPen(pen_grid)
         x, y, w, h = crop_pixel_rect.x(), crop_pixel_rect.y(), crop_pixel_rect.width(), crop_pixel_rect.height()
@@ -128,35 +147,31 @@ class CropOverlay(QWidget):
         painter.drawLine(QPointF(x, y + h/3), QPointF(x + w, y + h/3))
         painter.drawLine(QPointF(x, y + 2*h/3), QPointF(x + w, y + 2*h/3))
 
-        # 4. 绘制四个角 (加粗L型)
+        # 角落手柄
         pen_corner = QPen(QColor(255, 255, 255), 3)
         painter.setPen(pen_corner)
         cl = 20 
         
-        # 左上
         painter.drawLine(QPointF(x, y), QPointF(x + cl, y))
         painter.drawLine(QPointF(x, y), QPointF(x, y + cl))
-        # 右上
         painter.drawLine(QPointF(x + w, y), QPointF(x + w - cl, y))
         painter.drawLine(QPointF(x + w, y), QPointF(x + w, y + cl))
-        # 左下
         painter.drawLine(QPointF(x, y + h), QPointF(x + cl, y + h))
         painter.drawLine(QPointF(x, y + h), QPointF(x, y + h - cl))
-        # 右下
         painter.drawLine(QPointF(x + w, y + h), QPointF(x + w - cl, y + h))
         painter.drawLine(QPointF(x + w, y + h), QPointF(x + w, y + h - cl))
         
-        # 5. 绘制四边中间的短横线 (提示可以拖动)
-        painter.drawLine(QPointF(x + w/2 - 10, y), QPointF(x + w/2 + 10, y)) # 上
-        painter.drawLine(QPointF(x + w/2 - 10, y + h), QPointF(x + w/2 + 10, y + h)) # 下
-        painter.drawLine(QPointF(x, y + h/2 - 10), QPointF(x, y + h/2 + 10)) # 左
-        painter.drawLine(QPointF(x + w, y + h/2 - 10), QPointF(x + w, y + h/2 + 10)) # 右
+        # 边缘手柄
+        painter.drawLine(QPointF(x + w/2 - 10, y), QPointF(x + w/2 + 10, y))
+        painter.drawLine(QPointF(x + w/2 - 10, y + h), QPointF(x + w/2 + 10, y + h))
+        painter.drawLine(QPointF(x, y + h/2 - 10), QPointF(x, y + h/2 + 10))
+        painter.drawLine(QPointF(x + w, y + h/2 - 10), QPointF(x + w, y + h/2 + 10))
 
     def mousePressEvent(self, event):
         if self.image_rect.isEmpty(): return
         pos = event.position()
         rect = self.get_pixel_rect()
-        margin = 30 # 增大判定范围
+        margin = 30
         
         if rect.contains(pos) or rect.adjusted(-margin, -margin, margin, margin).contains(pos):
             self.dragging = True
@@ -165,17 +180,14 @@ class CropOverlay(QWidget):
             l, t, r, b = rect.left(), rect.top(), rect.right(), rect.bottom()
             x, y = pos.x(), pos.y()
             
-            # 优先判定角
             if abs(x - l) < margin and abs(y - t) < margin: self.drag_mode = 'tl'
             elif abs(x - r) < margin and abs(y - t) < margin: self.drag_mode = 'tr'
             elif abs(x - l) < margin and abs(y - b) < margin: self.drag_mode = 'bl'
             elif abs(x - r) < margin and abs(y - b) < margin: self.drag_mode = 'br'
-            # 判定边
             elif abs(x - l) < margin: self.drag_mode = 'l'
             elif abs(x - r) < margin: self.drag_mode = 'r'
             elif abs(y - t) < margin: self.drag_mode = 't'
             elif abs(y - b) < margin: self.drag_mode = 'b'
-            # 判定中心
             elif rect.contains(pos): self.drag_mode = 'center'
             else: self.dragging = False
 
