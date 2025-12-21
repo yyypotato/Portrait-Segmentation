@@ -60,6 +60,20 @@ icons = {
     "f_sentimental":  f"{base_url}/image/music_note/materialicons/24dp/2x/baseline_music_note_black_24dp.png",
     "f_individuality":f"{base_url}/action/fingerprint/materialicons/24dp/2x/baseline_fingerprint_black_24dp.png",
     "f_demist":       f"{base_url}/image/dehaze/materialicons/24dp/2x/baseline_dehaze_black_24dp.png",
+    # --- 裁剪工具图标 ---
+    "rotate_left":    f"{base_url}/image/rotate_left/materialicons/24dp/2x/baseline_rotate_left_black_24dp.png",
+    "flip":           f"{base_url}/image/flip/materialicons/24dp/2x/baseline_flip_black_24dp.png", # Material Design 没有直接的 flip icon，通常用 flip_camera 或类似代替，这里暂用 flip
+    # 如果 flip 404，可以用这个:
+    "flip_alt":       f"{base_url}/image/flip_camera_android/materialicons/24dp/2x/baseline_flip_camera_android_black_24dp.png",
+    
+    # --- 比例图标 (使用形状代替) ---
+    "ratio_custom":   f"{base_url}/image/crop/materialicons/24dp/2x/baseline_crop_black_24dp.png",
+    "ratio_full":     f"{base_url}/image/crop_free/materialicons/24dp/2x/baseline_crop_free_black_24dp.png",
+    "ratio_1_1":      f"{base_url}/image/crop_square/materialicons/24dp/2x/baseline_crop_square_black_24dp.png",
+    "ratio_3_4":      f"{base_url}/image/crop_portrait/materialicons/24dp/2x/baseline_crop_portrait_black_24dp.png",
+    "ratio_4_3":      f"{base_url}/image/crop_landscape/materialicons/24dp/2x/baseline_crop_landscape_black_24dp.png",
+    "ratio_16_9":     f"{base_url}/hardware/desktop_mac/materialicons/24dp/2x/baseline_desktop_mac_black_24dp.png", # 暂代
+
 }
 
 print(f"开始下载图标到 {save_dir} ...")

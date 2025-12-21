@@ -21,13 +21,23 @@ class ImageEditorEngine(QObject):
             "sharpness": 0,
             "vignette": 0
         }
-        
+        # 新增几何参数
+        self.geo_params = {
+            "rotate_angle": 0.0, # 微调角度
+            "rotate_90": 0,      # 90度旋转次数 (0-3)
+            "flip_h": False,     # 水平翻转
+            "crop_rect": None    # (x, y, w, h) 归一化坐标 0-1
+        }
+
         # 新增：当前滤镜
         self.current_filter = "original"
 
         # LUT 缓存
         self._lut_cache = None
         self._params_cache_key = None
+
+    def update_geo_param(self, key, value):
+        self.geo_params[key] = value
 
     def load_image(self, image_path, max_preview_size=1920):
         # 读取图片 (处理中文路径)
@@ -65,9 +75,46 @@ class ImageEditorEngine(QObject):
         """渲染图像管线"""
         if self.original_image is None: return None
         
-        # 1. 选择源图像
         src = self.preview_image if use_preview else self.original_image
         img = src.copy()
+
+        # --- 0. 几何变换 (Geometry) ---
+        # 顺序：翻转 -> 90度旋转 -> 微调旋转 -> 裁剪
+        
+        # 1. 翻转
+        if self.geo_params["flip_h"]:
+            img = cv2.flip(img, 1)
+
+        # 2. 90度旋转
+        k = self.geo_params["rotate_90"] % 4
+        if k > 0:
+            img = np.rot90(img, k) # rot90 是逆时针
+
+        # 3. 微调旋转 (中心旋转)
+        angle = self.geo_params["rotate_angle"]
+        if angle != 0:
+            h, w = img.shape[:2]
+            center = (w // 2, h // 2)
+            M = cv2.getRotationMatrix2D(center, angle, 1.0)
+            img = cv2.warpAffine(img, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+
+        # 4. 裁剪 (注意：裁剪框是基于变换后的图像的)
+        if self.geo_params["crop_rect"]:
+            nx, ny, nw, nh = self.geo_params["crop_rect"]
+            h, w = img.shape[:2]
+            x = int(nx * w)
+            y = int(ny * h)
+            cw = int(nw * w)
+            ch = int(nh * h)
+            
+            # 边界保护
+            x = max(0, x)
+            y = max(0, y)
+            cw = min(w - x, cw)
+            ch = min(h - y, ch)
+            
+            if cw > 0 and ch > 0:
+                img = img[y:y+ch, x:x+cw]
 
         # 2. 应用滤镜 (Filter) - 放在最前面作为基调
         img = FilterManager.apply_filter(img, self.current_filter)
