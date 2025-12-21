@@ -6,6 +6,7 @@ from .styles import Styles
 class MenuPage(QWidget):
     # 定义信号，用于通知主窗口切换页面
     go_to_seg = pyqtSignal()
+    go_to_editor = pyqtSignal()
     go_to_help = pyqtSignal()
     exit_app = pyqtSignal()
 
@@ -40,7 +41,12 @@ class MenuPage(QWidget):
         self.btn_seg.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_seg.setStyleSheet(Styles.MENU_BUTTON_STYLE)
         self.btn_seg.clicked.connect(self.go_to_seg.emit)
-        
+
+        self.btn_editor = QPushButton("🖌️ 进入编辑器")
+        self.btn_editor.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_editor.setStyleSheet(Styles.MENU_BUTTON_STYLE)
+        self.btn_editor.clicked.connect(self.go_to_editor.emit)
+
         # 按钮 2: 说明
         self.btn_help = QPushButton("📖 使用说明")
         self.btn_help.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -57,6 +63,7 @@ class MenuPage(QWidget):
         btn_container = QWidget()
         btn_container_layout = QVBoxLayout(btn_container)
         btn_container_layout.addWidget(self.btn_seg)
+        btn_container_layout.addWidget(self.btn_editor)
         btn_container_layout.addWidget(self.btn_help)
         btn_container_layout.addWidget(self.btn_exit)
         # 让按钮在中间，不要太宽
