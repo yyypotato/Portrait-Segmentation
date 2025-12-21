@@ -7,6 +7,8 @@ from .menu_page import MenuPage
 from .seg_page import SegPage
 from .help_page import HelpPage
 from src.gui.editor.editor_page import EditorPage
+from .workbench_page import WorkbenchPage
+from .history_page import HistoryPage
 
 class CustomTitleBar(QWidget):
     """
@@ -130,11 +132,17 @@ class MainWindow(QMainWindow):
         self.seg_page = SegPage()
         self.editor_page = EditorPage()
         self.help_page = HelpPage()
+        # 新增页面初始化
+        self.workbench_page = WorkbenchPage()
+        self.history_page = HistoryPage()
 
         self.stack.addWidget(self.menu_page)
         self.stack.addWidget(self.seg_page)
         self.stack.addWidget(self.editor_page)
         self.stack.addWidget(self.help_page)
+        # 添加新页面到堆叠部件
+        self.stack.addWidget(self.workbench_page)
+        self.stack.addWidget(self.history_page)
 
         self.connect_signals()
 
@@ -143,6 +151,11 @@ class MainWindow(QMainWindow):
         self.menu_page.go_to_seg.connect(lambda: self.stack.setCurrentWidget(self.seg_page))
         self.menu_page.go_to_editor.connect(lambda: self.stack.setCurrentWidget(self.editor_page))
         self.menu_page.go_to_help.connect(lambda: self.stack.setCurrentWidget(self.help_page))
+        
+        # 新增：连接工作台和历史记录的跳转信号
+        self.menu_page.go_to_workbench.connect(lambda: self.stack.setCurrentWidget(self.workbench_page))
+        self.menu_page.go_to_history.connect(lambda: self.stack.setCurrentWidget(self.history_page))
+        
         self.menu_page.exit_app.connect(self.close)
 
         # Seg Page Signals
@@ -153,3 +166,7 @@ class MainWindow(QMainWindow):
 
         # Help Page Signals
         self.help_page.go_back.connect(lambda: self.stack.setCurrentWidget(self.menu_page))
+        
+        # 新增：连接新页面的返回信号
+        self.workbench_page.go_back.connect(lambda: self.stack.setCurrentWidget(self.menu_page))
+        self.history_page.go_back.connect(lambda: self.stack.setCurrentWidget(self.menu_page))
