@@ -244,3 +244,32 @@ class ImageEditorEngine:
         out = mosaic_img.astype(float) * alpha + original_img.astype(float) * (1.0 - alpha)
         
         return np.clip(out, 0, 255).astype(np.uint8)
+    
+    def apply_label_layer(self, label_qimage, current_bg_img):
+        """
+        将标签层 (QImage) 叠加到背景图 (numpy array)
+        """
+        if label_qimage.isNull(): return current_bg_img
+        
+        # 1. QImage -> numpy (RGBA)
+        ptr = label_qimage.bits()
+        ptr.setsize(label_qimage.height() * label_qimage.width() * 4)
+        label_arr = np.frombuffer(ptr, np.uint8).reshape((label_qimage.height(), label_qimage.width(), 4))
+        
+        # 2. 提取 Alpha 通道
+        alpha = label_arr[:, :, 3].astype(float) / 255.0
+        overlay_rgb = label_arr[:, :, :3]
+        
+        # 3. 调整尺寸以匹配 (防止尺寸不一致报错)
+        h, w = current_bg_img.shape[:2]
+        if alpha.shape[:2] != (h, w):
+            alpha = cv2.resize(alpha, (w, h))
+            overlay_rgb = cv2.resize(overlay_rgb, (w, h))
+            
+        alpha = np.expand_dims(alpha, axis=2)
+        
+        # 4. 混合
+        # out = overlay * alpha + bg * (1 - alpha)
+        out = overlay_rgb.astype(float) * alpha + current_bg_img.astype(float) * (1.0 - alpha)
+        
+        return np.clip(out, 0, 255).astype(np.uint8)

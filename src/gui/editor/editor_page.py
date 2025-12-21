@@ -1,15 +1,16 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QLabel, QStackedWidget, QFileDialog, QScrollArea, QFrame, 
-                             QScroller, QScrollerProperties, QSlider)
-from PyQt6.QtCore import Qt, pyqtSignal, QRectF, QEvent, QPointF
+                             QScroller, QScrollerProperties, QSlider, QColorDialog, QTabWidget)
+from PyQt6.QtCore import Qt, pyqtSignal, QRectF, QEvent, QPointF, QSize
 # 修复：添加 QImage, QPixmap 导入
-from PyQt6.QtGui import QPainter, QPen, QColor, QFont, QImage, QPixmap
+from PyQt6.QtGui import QPainter, QPen, QColor, QFont, QImage, QPixmap, QIcon
 from .canvas import EditorCanvas
 from .processor import ImageEditorEngine
 from .ui_components import IconButton, ModernSlider 
 from .crop_overlay import CropOverlay
 from .doodle_overlay import DoodleOverlay
 from .mosaic_overlay import MosaicOverlay
+from .label_overlay import LabelOverlay 
 import cv2
 import numpy as np
 import os
@@ -116,6 +117,10 @@ class EditorPage(QWidget):
         self.mosaic_overlay = MosaicOverlay(self.canvas)
         self.mosaic_overlay.hide()
 
+        # 初始化 LabelOverlay (新增)
+        self.label_overlay = LabelOverlay(self.canvas)
+        self.label_overlay.hide()
+        
         # Bottom Panel
         bottom_panel = QWidget()
         bottom_panel.setFixedHeight(240)
@@ -135,7 +140,9 @@ class EditorPage(QWidget):
         self.sub_tool_stack.addWidget(self.create_filter_tools()) 
         self.sub_tool_stack.addWidget(self.create_doodle_tools()) # 3
         self.sub_tool_stack.addWidget(self.create_mosaic_tools()) # 4
-        for _ in range(3): self.sub_tool_stack.addWidget(QLabel(""))
+        self.sub_tool_stack.addWidget(self.create_label_tools())  # 5 (新增)
+        for _ in range(2): self.sub_tool_stack.addWidget(QLabel("")) # 调整占位符
+
 
         category_scroll = self.create_scroll_area()
         category_scroll.setFixedHeight(90)
@@ -178,6 +185,8 @@ class EditorPage(QWidget):
                 self.update_doodle_geometry()
             if not self.mosaic_overlay.isHidden():
                 self.update_mosaic_geometry()
+            if not self.label_overlay.isHidden(): # 新增
+                self.update_label_geometry()
         return super().eventFilter(source, event)
 
     def create_scroll_area(self):
@@ -245,7 +254,96 @@ class EditorPage(QWidget):
         btn.setStyleSheet("QPushButton { background-color: transparent; color: #b2bec3; border: 1px solid #636e72; border-radius: 15px; font-size: 11px; } QPushButton:checked { background-color: #dfe6e9; color: #2d3436; border: 1px solid white; } QPushButton:hover { border: 1px solid #dfe6e9; }")
         btn.clicked.connect(lambda: self.set_aspect_ratio(val, btn))
         return btn
-    
+
+    def create_label_tools(self):
+        """创建标签工具栏 (包含 Text box 和 Style 两个 Tab)"""
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 使用 TabWidget 模拟截图中的 "Text box | Style" 切换
+        self.label_tabs = QTabWidget()
+        self.label_tabs.setStyleSheet("""
+            QTabWidget::pane { border: none; }
+            QTabBar::tab { background: transparent; color: #b2bec3; padding: 8px 20px; font-size: 14px; }
+            QTabBar::tab:selected { color: white; border-bottom: 2px solid white; }
+        """)
+        
+        # Tab 1: Text box (选择气泡样式)
+        tab_box = QWidget()
+        box_layout = QHBoxLayout(tab_box)
+        box_scroll = self.create_scroll_area()
+        box_scroll.setFixedHeight(80)
+        box_widget = QWidget()
+        box_inner_layout = QHBoxLayout(box_widget)
+        box_inner_layout.setSpacing(15)
+        
+        # 读取 resources/images/labels 下的图片
+        label_dir = os.path.join("resources", "images", "labels")
+        if os.path.exists(label_dir):
+            for f in os.listdir(label_dir):
+                if f.endswith(".png"):
+                    path = os.path.join(label_dir, f)
+                    # 创建图片按钮
+                    btn = QPushButton()
+                    btn.setFixedSize(60, 60)
+                    btn.setIcon(QIcon(path)) # 需要导入 QIcon
+                    btn.setIconSize(QSize(50, 50)) # 需要导入 QSize
+                    btn.setStyleSheet("background: transparent; border: 1px solid #636e72; border-radius: 5px;")
+                    btn.clicked.connect(lambda c, p=path: self.label_overlay.add_label(p))
+                    box_inner_layout.addWidget(btn)
+        
+        box_inner_layout.addStretch()
+        box_scroll.setWidget(box_widget)
+        box_layout.addWidget(box_scroll)
+        
+        # Tab 2: Style (字体样式)
+        tab_style = QWidget()
+        style_layout = QHBoxLayout(tab_style)
+        style_layout.setSpacing(15)
+        
+        # 字体大小滑块
+        self.font_size_slider = QSlider(Qt.Orientation.Horizontal)
+        self.font_size_slider.setRange(8, 72)
+        self.font_size_slider.setValue(12)
+        self.font_size_slider.setFixedWidth(100)
+        self.font_size_slider.valueChanged.connect(lambda v: self.label_overlay.set_current_font_size(v))
+        
+        # 样式按钮
+        btn_bold = IconButton("style_bold", "", is_small=True)
+        btn_bold.setCheckable(True)
+        btn_bold.toggled.connect(lambda c: self.label_overlay.set_current_font_bold(c))
+        
+        btn_italic = IconButton("style_italic", "", is_small=True)
+        btn_italic.setCheckable(True)
+        btn_italic.toggled.connect(lambda c: self.label_overlay.set_current_font_italic(c))
+        
+        btn_shadow = IconButton("style_shadow", "", is_small=True)
+        btn_shadow.setCheckable(True)
+        btn_shadow.toggled.connect(lambda c: self.label_overlay.set_current_shadow(c))
+        
+        btn_color = IconButton("style_color", "", is_small=True)
+        btn_color.clicked.connect(self.pick_label_color)
+        
+        style_layout.addWidget(QLabel("Size:"))
+        style_layout.addWidget(self.font_size_slider)
+        style_layout.addWidget(btn_bold)
+        style_layout.addWidget(btn_italic)
+        style_layout.addWidget(btn_shadow)
+        style_layout.addWidget(btn_color)
+        style_layout.addStretch()
+        
+        self.label_tabs.addTab(tab_box, "Text box")
+        self.label_tabs.addTab(tab_style, "Style")
+        
+        layout.addWidget(self.label_tabs)
+        return container
+
+    def pick_label_color(self):
+        color = QColorDialog.getColor(Qt.GlobalColor.black, self, "选择文字颜色")
+        if color.isValid():
+            self.label_overlay.set_current_color(color)
+
     def create_adjust_tools(self):
         scroll = self.create_scroll_area()
         widget = QWidget()
@@ -406,6 +504,7 @@ class EditorPage(QWidget):
         self.crop_overlay.hide()
         self.doodle_overlay.hide()
         self.mosaic_overlay.hide()
+        self.label_overlay.hide() 
         self.slider_panel.hide()
         
         if index == 0: # Crop
@@ -436,7 +535,15 @@ class EditorPage(QWidget):
                 if self.mosaic_btns:
                     self.set_mosaic_tool("pixel", self.mosaic_btns[0])
                 self.show_action_bar("Mosaic", self.save_mosaic, self.cancel_mosaic)
-            
+
+        elif index == 5: # Label (新增)
+            img = self.engine.render(use_preview=True, include_crop=True)
+            if img is not None:
+                self.canvas.set_image(img)
+                self.label_overlay.show()
+                self.update_label_geometry()
+                self.show_action_bar("Label", self.save_label, self.cancel_label)
+
         else: # Adjust, Filter, etc.
             img = self.engine.render(use_preview=True, include_crop=True)
             if img is not None:
@@ -444,6 +551,45 @@ class EditorPage(QWidget):
             self.hide_action_bar()
             
             if index == 1: self.slider_panel.show()
+
+    def update_label_geometry(self):
+        if hasattr(self.canvas, 'get_image_rect'):
+            rect = self.canvas.get_image_rect()
+            self.label_overlay.set_image_rect(rect)
+        else:
+            self.label_overlay.set_image_rect(self.canvas.rect())
+
+    def save_label(self):
+        if self.engine.original_image is None:
+            self.cancel_label()
+            return
+            
+        # 1. 获取标签层图片
+        label_img = self.label_overlay.get_result_image(self.label_overlay.size())
+        
+        # 2. 获取当前底图
+        current_img = self.engine.render(use_preview=True, include_crop=True)
+        if current_img is None: return
+        
+        # 3. 合并
+        merged_img = self.engine.apply_label_layer(label_img, current_img)
+        
+        # 4. 更新 Engine
+        self.engine.preview_image = merged_img
+        self.engine.original_image = cv2.resize(merged_img, 
+                                                (self.engine.original_image.shape[1], self.engine.original_image.shape[0]))
+        
+        self.canvas.set_image(merged_img)
+        self.label_overlay.items.clear() # 清空标签
+        self.label_overlay.hide()
+        self.hide_action_bar()
+        self.switch_category(1, self.cat_btns[1])
+
+    def cancel_label(self):
+        self.label_overlay.items.clear()
+        self.label_overlay.hide()
+        self.hide_action_bar()
+        self.switch_category(1, self.cat_btns[1])
 
     def update_doodle_geometry(self):
         if hasattr(self.canvas, 'get_image_rect'):

@@ -1,13 +1,23 @@
 import os
 import urllib.request
+import ssl
 
 # 1. 确保目录存在
-save_dir = os.path.join("resources", "icons")
-if not os.path.exists(save_dir):
-    os.makedirs(save_dir)
+icon_dir = os.path.join("resources", "icons")
+label_dir = os.path.join("resources", "images", "labels") # 新增标签素材目录
+
+for d in [icon_dir, label_dir]:
+    if not os.path.exists(d):
+        os.makedirs(d)
 
 # 2. 定义图标映射
 base_url = "https://raw.githubusercontent.com/google/material-design-icons/master/png"
+
+# 创建 SSL 上下文，忽略证书验证 (防止某些环境下的 SSL 错误)
+try:
+    ssl_context = ssl._create_unverified_context()
+except AttributeError:
+    ssl_context = None
 
 icons = {
     # --- 现有图标 ---
@@ -86,24 +96,45 @@ icons = {
     "mosaic_triangle":f"{base_url}/image/details/materialicons/24dp/2x/baseline_details_black_24dp.png",
     "mosaic_hexagon": f"{base_url}/image/texture/materialicons/24dp/2x/baseline_texture_black_24dp.png",
     "mosaic_eraser":  f"{base_url}/action/delete/materialicons/24dp/2x/baseline_delete_black_24dp.png",
-
+    # --- 样式编辑图标 (新增) ---
+    "style_bold":     f"{base_url}/editor/format_bold/materialicons/24dp/2x/baseline_format_bold_black_24dp.png",
+    "style_italic":   f"{base_url}/editor/format_italic/materialicons/24dp/2x/baseline_format_italic_black_24dp.png",
+    "style_shadow":   f"{base_url}/image/filter_drama/materialicons/24dp/2x/baseline_filter_drama_black_24dp.png", # 用云朵代表阴影
+    "style_color":    f"{base_url}/image/palette/materialicons/24dp/2x/baseline_palette_black_24dp.png",
+    "style_align_left": f"{base_url}/editor/format_align_left/materialicons/24dp/2x/baseline_format_align_left_black_24dp.png",
+    "style_align_center": f"{base_url}/editor/format_align_center/materialicons/24dp/2x/baseline_format_align_center_black_24dp.png",
+  
     # --- 操作图标 (已修正路径) ---
     "action_check":   f"{base_url}/navigation/check/materialicons/24dp/2x/baseline_check_black_24dp.png", # 修正: action -> navigation
     "action_close":   f"{base_url}/navigation/close/materialicons/24dp/2x/baseline_close_black_24dp.png",
 }
-
-print(f"开始下载图标到 {save_dir} ...")
-
+labels = {
+    "bubble_oval": "https://img.icons8.com/ios-filled/100/ffffff/speech-bubble.png",
+    "bubble_rect": "https://img.icons8.com/ios-filled/100/ffffff/comments.png", # 修正: message -> comments
+    "bubble_cloud": "https://img.icons8.com/ios-filled/100/ffffff/thinking-bubble.png", # 修正: thought-bubble -> thinking-bubble
+    "bubble_round": "https://img.icons8.com/ios-filled/100/ffffff/chat.png",
+}
+print("开始下载图标...")
 for name, url in icons.items():
-    try:
-        save_path = os.path.join(save_dir, f"{name}.png")
-        # 如果文件不存在或大小为0(下载失败残留)，则重新下载
-        if not os.path.exists(save_path) or os.path.getsize(save_path) == 0:
-            print(f"正在下载: {name}.png ...")
+    save_path = os.path.join(icon_dir, f"{name}.png")
+    if not os.path.exists(save_path):
+        try:
             urllib.request.urlretrieve(url, save_path)
-        else:
-            print(f"跳过已存在: {name}.png")
-    except Exception as e:
-        print(f"❌ 下载 {name} 失败: {e}")
+            print(f"Downloaded {name}")
+        except Exception as e:
+            print(f"Error {name}: {e}")
 
-print("✅ 图标准备就绪！")
+print("开始下载标签素材...")
+for name, url in labels.items():
+    save_path = os.path.join(label_dir, f"{name}.png")
+    if not os.path.exists(save_path):
+        try:
+            # 伪装 User-Agent 防止 403
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req) as response, open(save_path, 'wb') as out_file:
+                out_file.write(response.read())
+            print(f"Downloaded {name}")
+        except Exception as e:
+            print(f"Error {name}: {e}")
+
+print("完成!")
