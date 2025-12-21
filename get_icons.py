@@ -80,7 +80,13 @@ icons = {
     "doodle_line":    f"{base_url}/content/remove/materialicons/24dp/2x/baseline_remove_black_24dp.png", # 修正: editor -> content
     "doodle_rect":    f"{base_url}/image/crop_square/materialicons/24dp/2x/baseline_crop_square_black_24dp.png",
     "doodle_circle":  f"{base_url}/image/panorama_fish_eye/materialicons/24dp/2x/baseline_panorama_fish_eye_black_24dp.png",
-    
+    # --- 马赛克工具 (新增) ---
+    "mosaic_pixel":   f"{base_url}/image/grid_on/materialicons/24dp/2x/baseline_grid_on_black_24dp.png",
+    "mosaic_blur":    f"{base_url}/image/blur_on/materialicons/24dp/2x/baseline_blur_on_black_24dp.png",
+    "mosaic_triangle":f"{base_url}/image/details/materialicons/24dp/2x/baseline_details_black_24dp.png",
+    "mosaic_hexagon": f"{base_url}/image/texture/materialicons/24dp/2x/baseline_texture_black_24dp.png",
+    "mosaic_eraser":  f"{base_url}/action/delete/materialicons/24dp/2x/baseline_delete_black_24dp.png",
+
     # --- 操作图标 (已修正路径) ---
     "action_check":   f"{base_url}/navigation/check/materialicons/24dp/2x/baseline_check_black_24dp.png", # 修正: action -> navigation
     "action_close":   f"{base_url}/navigation/close/materialicons/24dp/2x/baseline_close_black_24dp.png",

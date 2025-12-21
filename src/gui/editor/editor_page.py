@@ -2,12 +2,14 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                              QLabel, QStackedWidget, QFileDialog, QScrollArea, QFrame, 
                              QScroller, QScrollerProperties, QSlider)
 from PyQt6.QtCore import Qt, pyqtSignal, QRectF, QEvent, QPointF
-from PyQt6.QtGui import QPainter, QPen, QColor, QFont
+# 修复：添加 QImage, QPixmap 导入
+from PyQt6.QtGui import QPainter, QPen, QColor, QFont, QImage, QPixmap
 from .canvas import EditorCanvas
 from .processor import ImageEditorEngine
 from .ui_components import IconButton, ModernSlider 
 from .crop_overlay import CropOverlay
 from .doodle_overlay import DoodleOverlay
+from .mosaic_overlay import MosaicOverlay
 import cv2
 import numpy as np
 import os
@@ -110,6 +112,10 @@ class EditorPage(QWidget):
         self.doodle_overlay = DoodleOverlay(self.canvas)
         self.doodle_overlay.hide()
 
+        # 初始化 MosaicOverlay
+        self.mosaic_overlay = MosaicOverlay(self.canvas)
+        self.mosaic_overlay.hide()
+
         # Bottom Panel
         bottom_panel = QWidget()
         bottom_panel.setFixedHeight(240)
@@ -128,7 +134,8 @@ class EditorPage(QWidget):
         self.sub_tool_stack.addWidget(self.create_adjust_tools()) 
         self.sub_tool_stack.addWidget(self.create_filter_tools()) 
         self.sub_tool_stack.addWidget(self.create_doodle_tools()) # 3
-        for _ in range(4): self.sub_tool_stack.addWidget(QLabel(""))
+        self.sub_tool_stack.addWidget(self.create_mosaic_tools()) # 4
+        for _ in range(3): self.sub_tool_stack.addWidget(QLabel(""))
 
         category_scroll = self.create_scroll_area()
         category_scroll.setFixedHeight(90)
@@ -169,6 +176,8 @@ class EditorPage(QWidget):
                 self.update_overlay_geometry()
             if not self.doodle_overlay.isHidden():
                 self.update_doodle_geometry()
+            if not self.mosaic_overlay.isHidden():
+                self.update_mosaic_geometry()
         return super().eventFilter(source, event)
 
     def create_scroll_area(self):
@@ -262,7 +271,6 @@ class EditorPage(QWidget):
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(10, 0, 10, 0)
         layout.setSpacing(15)
-        # 修复：将滤镜的 key (第一个元素) 修改为带 f_ 前缀，以匹配 filters.py 中的定义
         filters = [("f_original", "原图", "f_original"), ("f_classic", "经典", "f_classic"),
                    ("f_dawn", "晨光", "f_dawn"), ("f_pure", "纯净", "f_pure"), ("f_mono", "黑白", "f_mono"),
                    ("f_metallic", "金属", "f_metallic"), ("f_blue", "蓝调", "f_blue"), ("f_cool", "清凉", "f_cool"),
@@ -283,13 +291,11 @@ class EditorPage(QWidget):
         return scroll
     
     def create_doodle_tools(self):
-        """创建涂鸦工具栏"""
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(10, 0, 10, 0)
         layout.setSpacing(10)
 
-        # 1. 粗细滑块 (中间)
         slider_layout = QHBoxLayout()
         self.doodle_slider = QSlider(Qt.Orientation.Horizontal)
         self.doodle_slider.setRange(1, 30)
@@ -304,7 +310,6 @@ class EditorPage(QWidget):
         slider_layout.addWidget(self.doodle_slider)
         slider_layout.addStretch()
 
-        # 2. 工具选择 (横向滚动)
         tools_scroll = self.create_scroll_area()
         tools_scroll.setFixedHeight(70)
         
@@ -325,7 +330,7 @@ class EditorPage(QWidget):
         self.doodle_btns = []
         for key, icon in doodle_tools:
             btn = IconButton(icon, "", is_small=True)
-            btn.setFixedSize(50, 50) # 小一点
+            btn.setFixedSize(50, 50)
             btn.clicked.connect(lambda c, k=key, b=btn: self.set_doodle_tool(k, b))
             tools_layout.addWidget(btn)
             self.doodle_btns.append(btn)
@@ -337,6 +342,60 @@ class EditorPage(QWidget):
         layout.addWidget(tools_scroll)
         
         return container
+
+    def create_mosaic_tools(self):
+        """创建马赛克工具栏"""
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(10, 0, 10, 0)
+        layout.setSpacing(10)
+
+        # 1. 粗细滑块
+        slider_layout = QHBoxLayout()
+        self.mosaic_slider = QSlider(Qt.Orientation.Horizontal)
+        self.mosaic_slider.setRange(5, 50)
+        self.mosaic_slider.setValue(20)
+        self.mosaic_slider.setFixedWidth(200)
+        self.mosaic_slider.setStyleSheet("""
+            QSlider::groove:horizontal { height: 4px; background: #636e72; border-radius: 2px; }
+            QSlider::handle:horizontal { background: #ffffff; width: 16px; height: 16px; margin: -6px 0; border-radius: 8px; }
+        """)
+        self.mosaic_slider.valueChanged.connect(lambda v: self.mosaic_overlay.set_brush_size(v))
+        slider_layout.addStretch()
+        slider_layout.addWidget(self.mosaic_slider)
+        slider_layout.addStretch()
+
+        # 2. 样式选择
+        tools_scroll = self.create_scroll_area()
+        tools_scroll.setFixedHeight(70)
+        
+        tools_widget = QWidget()
+        tools_layout = QHBoxLayout(tools_widget)
+        tools_layout.setContentsMargins(0, 0, 0, 0)
+        tools_layout.setSpacing(20)
+        
+        mosaic_types = [
+            ("pixel", "mosaic_pixel"),
+            ("blur", "mosaic_blur"),
+            ("triangle", "mosaic_triangle"),
+            ("hexagon", "mosaic_hexagon"),
+            ("eraser", "mosaic_eraser")
+        ]
+        
+        self.mosaic_btns = []
+        for key, icon in mosaic_types:
+            btn = IconButton(icon, "", is_small=True)
+            btn.setFixedSize(50, 50)
+            btn.clicked.connect(lambda c, k=key, b=btn: self.set_mosaic_tool(k, b))
+            tools_layout.addWidget(btn)
+            self.mosaic_btns.append(btn)
+            
+        tools_layout.addStretch()
+        tools_scroll.setWidget(tools_widget)
+
+        layout.addLayout(slider_layout)
+        layout.addWidget(tools_scroll)
+        return container
         
     def switch_category(self, index, btn_sender):
         self.sub_tool_stack.setCurrentIndex(index)
@@ -346,6 +405,7 @@ class EditorPage(QWidget):
         # 隐藏所有 Overlay 和 Slider
         self.crop_overlay.hide()
         self.doodle_overlay.hide()
+        self.mosaic_overlay.hide()
         self.slider_panel.hide()
         
         if index == 0: # Crop
@@ -356,50 +416,73 @@ class EditorPage(QWidget):
                 self.update_overlay_geometry()
             
         elif index == 3: # Doodle
-            # 渲染当前图像 (含裁剪)
             img = self.engine.render(use_preview=True, include_crop=True)
             if img is not None:
                 self.canvas.set_image(img)
-                
-                # 显示涂鸦层
-                self.doodle_overlay.clear_canvas() # 每次进入清空，或者保留
+                self.doodle_overlay.clear_canvas()
                 self.doodle_overlay.show()
                 self.update_doodle_geometry()
-                
-                # 默认选中曲线
                 if self.doodle_btns:
                     self.set_doodle_tool("curve", self.doodle_btns[1])
-                    
-                # 显示底部确认栏
                 self.show_action_bar("Doodle", self.save_doodle, self.cancel_doodle)
+
+        elif index == 4: # Mosaic
+            img = self.engine.render(use_preview=True, include_crop=True)
+            if img is not None:
+                self.canvas.set_image(img)
+                self.mosaic_overlay.clear_mask()
+                self.mosaic_overlay.show()
+                self.update_mosaic_geometry()
+                if self.mosaic_btns:
+                    self.set_mosaic_tool("pixel", self.mosaic_btns[0])
+                self.show_action_bar("Mosaic", self.save_mosaic, self.cancel_mosaic)
             
         else: # Adjust, Filter, etc.
             img = self.engine.render(use_preview=True, include_crop=True)
             if img is not None:
                 self.canvas.set_image(img)
-            self.hide_action_bar() # 恢复分类栏
+            self.hide_action_bar()
             
             if index == 1: self.slider_panel.show()
 
     def update_doodle_geometry(self):
-        """同步涂鸦层位置"""
-        # 涂鸦层应该覆盖在显示的图片上
         if hasattr(self.canvas, 'get_image_rect'):
             rect = self.canvas.get_image_rect()
             self.doodle_overlay.set_image_rect(rect)
         else:
             self.doodle_overlay.set_image_rect(self.canvas.rect())
 
+    def update_mosaic_geometry(self):
+        if hasattr(self.canvas, 'get_image_rect'):
+            rect = self.canvas.get_image_rect()
+            self.mosaic_overlay.set_image_rect(rect)
+        else:
+            self.mosaic_overlay.set_image_rect(self.canvas.rect())
 
     def set_doodle_tool(self, tool, btn_sender):
         for btn in self.doodle_btns: btn.setChecked(False)
         btn_sender.setChecked(True)
         self.doodle_overlay.set_tool(tool)
 
+    def set_mosaic_tool(self, tool_type, btn_sender):
+        for btn in self.mosaic_btns: btn.setChecked(False)
+        btn_sender.setChecked(True)
+        
+        if tool_type == "eraser":
+            self.mosaic_overlay.set_mode("eraser")
+        else:
+            self.mosaic_overlay.set_mode("draw")
+            current_img = self.engine.render(use_preview=True, include_crop=True)
+            if current_img is not None:
+                mosaic_img = self.engine.generate_mosaic_image(current_img, style=tool_type)
+                h, w, ch = mosaic_img.shape
+                bytes_per_line = ch * w
+                qimg = QImage(mosaic_img.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+                self.mosaic_overlay.set_mosaic_pixmap(QPixmap.fromImage(qimg))
+                self.current_mosaic_img_numpy = mosaic_img
+
     # --- 底部操作栏逻辑 ---
     def show_action_bar(self, title, on_save, on_cancel):
-        """显示底部的 X 和 √"""
-        # 懒加载创建 action_bar
         if not hasattr(self, 'action_bar'):
             self.action_bar = QWidget(self)
             self.action_bar.setFixedHeight(60)
@@ -421,11 +504,9 @@ class EditorPage(QWidget):
             layout.addWidget(self.lbl_action_title, 1)
             layout.addWidget(self.btn_save)
             
-            # 将 action_bar 添加到底部布局
-            bottom_layout = self.layout().itemAt(2).widget().layout() # 获取 bottom_panel layout
+            bottom_layout = self.layout().itemAt(2).widget().layout()
             bottom_layout.addWidget(self.action_bar)
             
-        # 修复：使用 try-except 忽略断开失败的错误
         try: self.btn_cancel.clicked.disconnect()
         except TypeError: pass
         
@@ -436,52 +517,69 @@ class EditorPage(QWidget):
         self.btn_save.clicked.connect(on_save)
         self.lbl_action_title.setText(title)
         
-        # 隐藏分类按钮区域，显示操作栏
         self.findChild(QScrollArea).hide() 
         self.action_bar.show()
 
     def hide_action_bar(self):
         if hasattr(self, 'action_bar'):
             self.action_bar.hide()
-            # 显示分类按钮
             bottom_layout = self.layout().itemAt(2).widget().layout()
             for i in range(bottom_layout.count()):
                 w = bottom_layout.itemAt(i).widget()
                 if isinstance(w, QScrollArea): w.show()
 
     def save_doodle(self):
-        """保存涂鸦"""
-        # 修复：检查 original_image 是否存在
         if self.engine.original_image is None:
             self.cancel_doodle()
             return
 
-        # 1. 获取涂鸦层
         doodle_pix = self.doodle_overlay.get_result()
-        
-        # 2. 获取当前显示的图片 (numpy)
         current_img = self.engine.render(use_preview=True, include_crop=True)
         if current_img is None: return
         
-        # 3. 合并
         merged_img = self.engine.apply_doodle_layer(doodle_pix, current_img)
         
-        # 4. 更新 Engine 中的图片
         self.engine.preview_image = merged_img
-        # 修复：确保 original_image 存在后再访问 shape
         self.engine.original_image = cv2.resize(merged_img, 
                                                 (self.engine.original_image.shape[1], self.engine.original_image.shape[0]))
         
         self.canvas.set_image(merged_img)
         self.doodle_overlay.hide()
         self.hide_action_bar()
-        # 切换回 Adjust 页面或其他
         self.switch_category(1, self.cat_btns[1])
 
     def cancel_doodle(self):
-        """取消涂鸦"""
         self.doodle_overlay.clear_canvas()
         self.doodle_overlay.hide()
+        self.hide_action_bar()
+        self.switch_category(1, self.cat_btns[1])
+
+    def save_mosaic(self):
+        if self.engine.original_image is None:
+            self.cancel_mosaic()
+            return
+
+        mask_qimg = self.mosaic_overlay.get_mask()
+        current_img = self.engine.render(use_preview=True, include_crop=True)
+        if current_img is None: return
+        
+        if not hasattr(self, 'current_mosaic_img_numpy'):
+             self.current_mosaic_img_numpy = self.engine.generate_mosaic_image(current_img, "pixel")
+
+        merged_img = self.engine.apply_mosaic_mask(current_img, self.current_mosaic_img_numpy, mask_qimg)
+        
+        self.engine.preview_image = merged_img
+        self.engine.original_image = cv2.resize(merged_img, 
+                                                (self.engine.original_image.shape[1], self.engine.original_image.shape[0]))
+        
+        self.canvas.set_image(merged_img)
+        self.mosaic_overlay.hide()
+        self.hide_action_bar()
+        self.switch_category(1, self.cat_btns[1])
+
+    def cancel_mosaic(self):
+        self.mosaic_overlay.clear_mask()
+        self.mosaic_overlay.hide()
         self.hide_action_bar()
         self.switch_category(1, self.cat_btns[1])
         
@@ -499,7 +597,6 @@ class EditorPage(QWidget):
 
     def on_rotate_angle_change(self, angle):
         self.engine.update_geo_param("rotate_angle", angle)
-        # 旋转时，显示全图 (include_crop=False) 以便调整裁剪框
         res = self.engine.render(use_preview=True, include_crop=False)
         if res is not None:
             self.canvas.set_image(res)
@@ -508,7 +605,6 @@ class EditorPage(QWidget):
     def rotate_90_ccw(self):
         current = self.engine.geo_params["rotate_90"]
         self.engine.update_geo_param("rotate_90", current + 1)
-        # 旋转时，显示全图
         res = self.engine.render(use_preview=True, include_crop=False)
         if res is not None:
             self.canvas.set_image(res)
@@ -517,7 +613,6 @@ class EditorPage(QWidget):
     def flip_horizontal(self):
         current = self.engine.geo_params["flip_h"]
         self.engine.update_geo_param("flip_h", not current)
-        # 翻转时，显示全图
         res = self.engine.render(use_preview=True, include_crop=False)
         if res is not None:
             self.canvas.set_image(res)
@@ -527,11 +622,9 @@ class EditorPage(QWidget):
         btn_sender.setChecked(True)
         
         if ratio == "reset":
-            # 重置为原图尺寸
             self.crop_overlay.reset_crop()
             self.engine.update_geo_param("crop_rect", None)
         else:
-            # 设置比例，Overlay 会自动计算最大居中矩形
             self.crop_overlay.set_aspect_ratio(ratio)
         
     def switch_adjust_tool(self, key, btn_sender):
@@ -572,7 +665,6 @@ class EditorPage(QWidget):
 
     def save_image(self):
         if self.engine.original_image is None: return
-        # 保存时 include_crop=True，确保保存裁剪后的结果
         final_image = self.engine.render(use_preview=False, include_crop=True)
         if final_image is None: return
         

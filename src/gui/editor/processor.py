@@ -180,3 +180,67 @@ class ImageEditorEngine:
         out = foreground * alpha + background * (1.0 - alpha)
         
         return np.clip(out, 0, 255).astype(np.uint8)
+    def generate_mosaic_image(self, img, style="pixel"):
+        """
+        生成全图的马赛克效果
+        :param img: 原图 (numpy RGB)
+        :param style: 'pixel', 'blur', 'triangle', 'hexagon'
+        """
+        h, w = img.shape[:2]
+        
+        if style == "pixel":
+            # 像素风：缩小再放大
+            scale = 0.05 # 像素块大小
+            small = cv2.resize(img, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
+            return cv2.resize(small, (w, h), interpolation=cv2.INTER_NEAREST)
+            
+        elif style == "blur":
+            # 毛玻璃：高斯模糊
+            ksize = max(1, int(min(w, h) * 0.05)) | 1 # 奇数
+            return cv2.GaussianBlur(img, (ksize, ksize), 0)
+            
+        elif style == "triangle":
+            # 模拟三角/晶格 (通过金字塔均值漂移或简单的多边形模拟，这里用简单的双边滤波+像素化模拟)
+            # 先模糊
+            blur = cv2.bilateralFilter(img, 9, 75, 75)
+            # 再像素化
+            scale = 0.08
+            small = cv2.resize(blur, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_LINEAR)
+            return cv2.resize(small, (w, h), interpolation=cv2.INTER_NEAREST)
+            
+        elif style == "hexagon":
+            # 模拟纹理 (这里简单用中值模糊模拟油画感/去噪点)
+            ksize = max(1, int(min(w, h) * 0.02)) | 1
+            return cv2.medianBlur(img, ksize)
+            
+        return img
+
+    def apply_mosaic_mask(self, original_img, mosaic_img, mask_qimage):
+        """
+        将马赛克图通过遮罩应用到原图
+        """
+        if mask_qimage.isNull(): return original_img
+        
+        # 1. Mask QImage -> numpy
+        ptr = mask_qimage.bits()
+        ptr.setsize(mask_qimage.height() * mask_qimage.width() * 4)
+        mask_arr = np.frombuffer(ptr, np.uint8).reshape((mask_qimage.height(), mask_qimage.width(), 4))
+        
+        # 提取 Alpha 通道作为权重 (0-1)
+        alpha = mask_arr[:, :, 3].astype(float) / 255.0
+        
+        # 确保尺寸匹配
+        th, tw = original_img.shape[:2]
+        if alpha.shape[:2] != (th, tw):
+            alpha = cv2.resize(alpha, (tw, th), interpolation=cv2.INTER_LINEAR)
+            
+        alpha = np.expand_dims(alpha, axis=2)
+        
+        # 混合: out = mosaic * alpha + original * (1 - alpha)
+        # 确保 mosaic_img 尺寸匹配
+        if mosaic_img.shape[:2] != (th, tw):
+            mosaic_img = cv2.resize(mosaic_img, (tw, th))
+            
+        out = mosaic_img.astype(float) * alpha + original_img.astype(float) * (1.0 - alpha)
+        
+        return np.clip(out, 0, 255).astype(np.uint8)
