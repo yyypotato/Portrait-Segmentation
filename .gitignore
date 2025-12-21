@@ -32,6 +32,7 @@ resources/weights/*.onnx
 
 # 忽略测试用的图片数据 (保留目录结构，但忽略具体图片)
 resources/images/
+resources/icons/
 resources/images/person/*
 resources/images/background/*
 !resources/images/person/.gitkeep
