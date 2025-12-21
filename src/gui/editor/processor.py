@@ -126,22 +126,38 @@ class ImageEditorEngine:
         return lut
 
     def apply_hue(self, img, shift):
-        """色相旋转"""
-        # 转换到 HSV
-        hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+        """
+        色相旋转 (高精度版)
+        使用 float32 进行计算，H 范围为 0-360，避免 uint8 (0-179) 带来的精度丢失和色彩断层。
+        """
+        if shift == 0: return img
+
+        # 1. 转换为 float32，范围归一化到 0-1
+        # 这一步非常关键，能消除色彩波纹和锯齿
+        img_float = img.astype(np.float32) / 255.0
+
+        # 2. 转换到 HSV 空间
+        # 注意：对于 float32 图像，OpenCV 的 H 通道范围是 0-360，S/V 是 0-1
+        hsv = cv2.cvtColor(img_float, cv2.COLOR_RGB2HSV)
         h, s, v = cv2.split(hsv)
+
+        # 3. 执行色相偏移
+        # shift 输入范围是 -180 到 180
+        h_new = h + shift
+
+        # 4. 处理循环 (0-360)
+        # 使用模运算处理旋转，比 if/else 更平滑
+        h_new = np.mod(h_new, 360.0)
         
-        # OpenCV 的 H 范围是 0-179
-        # shift 范围是 -180 到 180，需要映射到 0-180 的偏移
-        shift = shift / 2.0 
-        
-        # 使用 int16 防止溢出
-        h_new = h.astype(np.int16) + shift
-        h_new = np.where(h_new < 0, h_new + 180, h_new)
-        h_new = np.where(h_new > 179, h_new - 180, h_new)
-        
-        hsv = cv2.merge([h_new.astype(np.uint8), s, v])
-        return cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+        # 5. 合并通道
+        hsv_new = cv2.merge([h_new, s, v])
+
+        # 6. 转回 RGB 并还原到 uint8
+        img_new = cv2.cvtColor(hsv_new, cv2.COLOR_HSV2RGB)
+        # 限制范围并转换回整数
+        img_new = (np.clip(img_new, 0, 1) * 255).astype(np.uint8)
+
+        return img_new
 
     def apply_saturation(self, img, saturation):
         if saturation == 0: return img

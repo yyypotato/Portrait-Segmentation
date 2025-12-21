@@ -27,22 +27,52 @@ class EditorPage(QWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # --- 1. 顶部栏 (保持简洁) ---
+        # --- 1. 顶部栏 ---
         top_bar = QWidget()
         top_bar.setFixedHeight(50)
-        top_bar.setStyleSheet("background-color: #1e272e;") # 纯黑背景
+        top_bar.setStyleSheet("background-color: #1e272e; border-bottom: 1px solid #2d3436;")
         top_layout = QHBoxLayout(top_bar)
+        top_layout.setContentsMargins(15, 0, 15, 0)
         
-        btn_back = QPushButton("取消")
-        btn_back.setStyleSheet("color: #b2bec3; border: none; font-size: 14px;")
+        btn_back = QPushButton(" 返回菜单")
+        btn_back.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_back.setStyleSheet("color: #b2bec3; border: none; font-size: 14px; font-weight: bold;")
         btn_back.clicked.connect(self.go_back.emit)
         
-        btn_save = QPushButton("保存")
-        btn_save.setStyleSheet("background-color: #0984e3; color: white; border-radius: 15px; padding: 5px 15px; font-weight: bold;")
+        # 添加打开图片按钮
+        btn_open = QPushButton("打开图片")
+        btn_open.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_open.setStyleSheet("""
+            QPushButton {
+                background-color: #2d3436; 
+                color: white; 
+                border: 1px solid #636e72;
+                border-radius: 15px; 
+                padding: 5px 15px; 
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #636e72; }
+        """)
+        btn_open.clicked.connect(self.open_image)
+
+        btn_save = QPushButton("保存结果")
+        btn_save.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_save.setStyleSheet("""
+            QPushButton {
+                background-color: #0984e3; 
+                color: white; 
+                border-radius: 15px; 
+                padding: 5px 15px; 
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #74b9ff; }
+        """)
         btn_save.clicked.connect(self.save_image)
 
         top_layout.addWidget(btn_back)
         top_layout.addStretch()
+        top_layout.addWidget(btn_open)
+        top_layout.addSpacing(10)
         top_layout.addWidget(btn_save)
 
         # --- 2. 中间画布区 ---
@@ -87,7 +117,7 @@ class EditorPage(QWidget):
         cat_layout.setContentsMargins(10, 0, 10, 0)
         cat_layout.setSpacing(15)
 
-        # 2. 确保这里的名字与 get_icons.py 中的 key 一致
+        # 确保这里的名字与 get_icons.py 中的 key 一致
         categories = [
             ("crop", "裁剪", 0),
             ("adjust", "调节", 1),
@@ -101,7 +131,7 @@ class EditorPage(QWidget):
 
         self.cat_btns = []
         for icon, name, idx in categories:
-            # 3. 使用 IconButton
+            # 使用 IconButton
             btn = IconButton(icon, name, is_small=False)
             btn.clicked.connect(lambda checked, i=idx, b=btn: self.switch_category(i, b))
             cat_layout.addWidget(btn)
@@ -137,7 +167,7 @@ class EditorPage(QWidget):
         layout.setContentsMargins(10, 0, 10, 0)
         layout.setSpacing(15)
 
-        # 4. 确保这里的名字与 get_icons.py 中的 key 一致
+        # 确保这里的名字与 get_icons.py 中的 key 一致
         tools = [
             ("brightness", "亮度", "brightness"),
             ("contrast", "对比度", "contrast"),
@@ -150,7 +180,7 @@ class EditorPage(QWidget):
 
         self.adjust_btns = []
         for icon, name, key in tools:
-            # 5. 使用 IconButton
+            # 使用 IconButton
             btn = IconButton(icon, name, is_small=True)
             btn.clicked.connect(lambda c, k=key, b=btn: self.switch_adjust_tool(k, b))
             layout.addWidget(btn)
@@ -197,7 +227,8 @@ class EditorPage(QWidget):
     def on_slider_change(self, value):
         """滑块拖动回调"""
         self.engine.update_param(self.current_adjust_key, value)
-        res = self.engine.render_final()
+        # 使用 render(use_preview=True) 获取预览图
+        res = self.engine.render(use_preview=True)
         self.canvas.set_image(res)
 
     def open_image(self):
@@ -220,13 +251,20 @@ class EditorPage(QWidget):
             print(f"已加载图片: {path}")
 
     def save_image(self):
-        # ... (保持不变)
         if self.engine.original_image is None: return
-        path, _ = QFileDialog.getSaveFileName(self, "保存图片", "edited_result.jpg", "Images (*.jpg *.png)")
-        if not path: return
         
+        # 渲染全分辨率结果
         final_image = self.engine.render(use_preview=False)
         if final_image is None: return
+
+        import os
+        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        output_dir = os.path.join(root_dir, "output")
+        if not os.path.exists(output_dir): os.makedirs(output_dir)
+        default_path = os.path.join(output_dir, "edited_result.jpg")
+
+        path, _ = QFileDialog.getSaveFileName(self, "保存图片", default_path, "Images (*.jpg *.png)")
+        if not path: return
 
         try:
             save_img = cv2.cvtColor(final_image, cv2.COLOR_RGB2BGR)
