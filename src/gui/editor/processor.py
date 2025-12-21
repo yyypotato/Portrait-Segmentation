@@ -7,14 +7,19 @@ class ImageEditorEngine:
         self.preview_image = None
         self.current_image = None
         
+        # 初始化所有参数
         self.params = {
-            "brightness": 0,
-            "contrast": 0,
-            "saturation": 0,
-            "temperature": 0, # 新增：色温 (蓝 <-> 黄)
-            "tint": 0,        # 新增：色调 (绿 <-> 洋红)
-            "vignette": 0,    # 新增：暗角
-            "sharpness": 0,
+            "brightness": 0,    # -100 ~ 100
+            "contrast": 0,      # -100 ~ 100
+            "saturation": 0,    # -100 ~ 100
+            "sharpness": 0,     # 0 ~ 100
+            "highlights": 0,    # -100 ~ 100 (高光压制/提亮)
+            "shadows": 0,       # -100 ~ 100 (阴影提亮/压暗)
+            "hue": 0,           # -180 ~ 180 (色相旋转)
+            # 暂时保留之前的，防止报错，后续可整合
+            "temperature": 0,
+            "tint": 0,
+            "vignette": 0,
         }
         self._lut_cache = None
         self._params_cache_key = None
@@ -25,7 +30,6 @@ class ImageEditorEngine:
         bgr = cv2.imdecode(stream, cv2.IMREAD_COLOR)
         self.original_image = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         
-        # 生成预览图 (限制最大边长，保证实时性)
         h, w = self.original_image.shape[:2]
         scale = min(max_preview_size / w, max_preview_size / h, 1.0)
         if scale < 1.0:
@@ -44,26 +48,29 @@ class ImageEditorEngine:
         src = self.preview_image if use_preview else self.original_image
         if src is None: return None
 
-        # 1. 基础 LUT (亮/对)
+        # 1. 基础 LUT (亮度、对比度、高光、阴影)
+        # 将这四个最常用的调整合并为一个 LUT 以提升性能
         lut = self._get_combined_lut()
         result = cv2.LUT(src, lut)
 
-        # 2. 色温/色调 (White Balance) - 性能优化版
-        if self.params["temperature"] != 0 or self.params["tint"] != 0:
-            result = self.apply_white_balance(result, self.params["temperature"], self.params["tint"])
+        # 2. 色相 (Hue)
+        if self.params["hue"] != 0:
+            result = self.apply_hue(result, self.params["hue"])
 
-        # 3. 饱和度
+        # 3. 饱和度 (Saturation)
         if self.params["saturation"] != 0:
             result = self.apply_saturation(result, self.params["saturation"])
 
-        # 4. 锐化
+        # 4. 锐化 (Sharpness)
         if self.params["sharpness"] > 0:
             kernel = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
             amount = self.params["sharpness"] / 100.0
             sharp = cv2.filter2D(result, -1, kernel)
             result = cv2.addWeighted(result, 1.0 - amount * 0.2, sharp, amount * 0.2, 0)
 
-        # 5. 暗角 (Vignette)
+        # 5. 其他遗留效果 (色温/暗角) - 暂时保留
+        if self.params["temperature"] != 0 or self.params["tint"] != 0:
+            result = self.apply_white_balance(result, self.params["temperature"], self.params["tint"])
         if self.params["vignette"] > 0:
             result = self.apply_vignette(result, self.params["vignette"])
 
@@ -71,82 +78,99 @@ class ImageEditorEngine:
         return result
 
     def _get_combined_lut(self):
-        # ... (保持之前的 LUT 逻辑不变) ...
-        # 检查缓存
-        current_key = (self.params["brightness"], self.params["contrast"]) # 只缓存这两个
+        """生成组合查找表：亮度 + 对比度 + 高光 + 阴影"""
+        # 缓存键值
+        current_key = (self.params["brightness"], self.params["contrast"], 
+                       self.params["highlights"], self.params["shadows"])
+        
         if self._params_cache_key == current_key and self._lut_cache is not None:
             return self._lut_cache
 
         x = np.arange(256, dtype=np.float32)
         
-        # 亮度
+        # --- 1. 亮度 ---
         if self.params["brightness"] != 0:
             x = x + self.params["brightness"]
 
-        # 对比度
+        # --- 2. 对比度 ---
         if self.params["contrast"] != 0:
             contrast = self.params["contrast"]
             factor = (259 * (contrast + 255)) / (255 * (259 - contrast))
             x = factor * (x - 128) + 128
 
-        x = np.clip(x, 0, 255).astype(np.uint8)
-        lut = np.dstack((x, x, x))
+        # --- 3. 高光/阴影 (基于曲线调整) ---
+        # 归一化到 0-1
+        x = np.clip(x, 0, 255) / 255.0
         
+        # 阴影调整 (针对暗部 x < 0.5)
+        shadows = self.params["shadows"] / 100.0
+        if shadows != 0:
+            # 简单的阴影提亮/压暗公式
+            # 当 shadows > 0, 提升暗部; shadows < 0, 压暗暗部
+            mask = 1.0 - np.power(x, 0.5) # 暗部掩码
+            x = x + mask * shadows * 0.5
+
+        # 高光调整 (针对亮部 x > 0.5)
+        highlights = self.params["highlights"] / 100.0
+        if highlights != 0:
+            # 当 highlights < 0, 压制高光 (恢复细节); highlights > 0, 提亮高光
+            mask = np.power(x, 2.0) # 亮部掩码
+            x = x + mask * highlights * 0.5
+
+        # 反归一化
+        x = np.clip(x * 255, 0, 255).astype(np.uint8)
+        
+        lut = np.dstack((x, x, x))
         self._lut_cache = lut
         self._params_cache_key = current_key
         return lut
 
-    def apply_saturation(self, img, saturation):
-        """独立处理饱和度 (因为很难合并进 1D LUT)"""
-        if saturation == 0: return img
+    def apply_hue(self, img, shift):
+        """色相旋转"""
+        # 转换到 HSV
+        hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+        h, s, v = cv2.split(hsv)
         
-        # 转换为 HSV
+        # OpenCV 的 H 范围是 0-179
+        # shift 范围是 -180 到 180，需要映射到 0-180 的偏移
+        shift = shift / 2.0 
+        
+        # 使用 int16 防止溢出
+        h_new = h.astype(np.int16) + shift
+        h_new = np.where(h_new < 0, h_new + 180, h_new)
+        h_new = np.where(h_new > 179, h_new - 180, h_new)
+        
+        hsv = cv2.merge([h_new.astype(np.uint8), s, v])
+        return cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+
+    def apply_saturation(self, img, saturation):
+        if saturation == 0: return img
         hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV).astype(np.float32)
-        # S 通道调整
         s = hsv[:, :, 1]
         s = s * (1.0 + saturation / 100.0)
         hsv[:, :, 1] = np.clip(s, 0, 255)
-        
         return cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
-    
-    def apply_white_balance(self, img, temp, tint):
-        """
-        色温: 调整 B/R 通道
-        色调: 调整 G 通道
-        """
-        b, g, r = cv2.split(img)
-        
-        # 色温: 正值变黄(加R减B)，负值变蓝(加B减R)
-        if temp > 0:
-            r = cv2.add(r, temp)
-            b = cv2.subtract(b, temp)
-        else:
-            r = cv2.add(r, temp) # temp is negative
-            b = cv2.subtract(b, temp)
 
-        # 色调: 正值变洋红(减G)，负值变绿(加G)
+    def apply_white_balance(self, img, temp, tint):
+        b, g, r = cv2.split(img)
+        if temp > 0:
+            r = cv2.add(r, temp); b = cv2.subtract(b, temp)
+        else:
+            r = cv2.add(r, temp); b = cv2.subtract(b, temp)
         if tint != 0:
             g = cv2.subtract(g, tint)
-
         return cv2.merge([b, g, r])
-    
+
     def apply_vignette(self, img, strength):
-        """添加暗角"""
         rows, cols = img.shape[:2]
-        # 生成高斯核
         kernel_x = cv2.getGaussianKernel(cols, cols/2)
         kernel_y = cv2.getGaussianKernel(rows, rows/2)
         kernel = kernel_y * kernel_x.T
-        
-        # 归一化并反转
         mask = 255 * kernel / np.linalg.norm(kernel)
-        mask = mask / mask.max() # 0-1
-        
-        # 强度控制
+        mask = mask / mask.max()
         strength = strength / 100.0
         mask_layer = 1.0 - (1.0 - mask) * strength
         mask_layer = np.dstack([mask_layer] * 3)
-        
         return (img * mask_layer).astype(np.uint8)
 
     def render_final(self):
