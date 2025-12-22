@@ -172,7 +172,10 @@ def apply_filter(img, filter_name):
     elif filter_name in ["f_caramel", "f_valencia"]:
         # 【焦糖】：暖黄，褪色感
         res[:,:,2] = cv2.LUT(res[:,:,2], np.interp(np.arange(256), [0, 255], [0, 220]).astype(np.uint8)) # 减蓝
-        res = cv2.addWeighted(res, 1.0, np.array([[[20, 10, 0]]], dtype=np.uint8), 0.1, 0) # 叠加暖色层
+        
+        # 修复：cv2.addWeighted 不支持广播，必须创建同尺寸的覆盖层
+        overlay = np.full_like(res, [20, 10, 0])
+        res = cv2.addWeighted(res, 1.0, overlay, 0.1, 0) # 叠加暖色层
 
     elif filter_name == "f_memory":
         # 【回忆】：褪色黑 (Lifted Blacks)
