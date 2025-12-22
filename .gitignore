@@ -25,20 +25,29 @@ Desktop.ini
 .DS_Store
 
 # --- Project Specific (Data & Weights) ---
-# 忽略所有下载的模型权重缓存
+# 忽略所有下载的模型权重缓存和训练生成的权重
 resources/weights/hub/
 resources/weights/*.pth
 resources/weights/*.onnx
 
 # 忽略测试用的图片数据 (保留目录结构，但忽略具体图片)
-resources/images/
-resources/icons/
+resources/icons/*
 resources/images/person/*
 resources/images/background/*
 !resources/images/person/.gitkeep
 !resources/images/background/.gitkeep
 
-# 忽略运行输出
+# 忽略根目录下的临时图片文件夹
+images/
+
+# --- Datasets ---
+# 忽略数据集的具体图片内容，但保留目录结构
+datasets/EG1800/images/*
+datasets/EG1800/masks/*
+!datasets/EG1800/images/.gitkeep
+!datasets/EG1800/masks/.gitkeep
+
+# --- Outputs ---
 output/
 results/
 
