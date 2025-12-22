@@ -23,17 +23,24 @@ class MosaicOverlay(QWidget):
         self.mode = 'draw'
 
     def set_image_rect(self, rect):
-        # 修复：处理 QRectF 类型，转换为 QRect
         if isinstance(rect, QRectF):
             rect = rect.toRect()
             
         self.image_rect = rect
         self.setGeometry(rect)
         
-        # 如果尺寸改变，重置遮罩
+        # 修复：如果尺寸改变，尝试缩放现有遮罩，而不是直接清空
+        # 这样在调整窗口大小时不会丢失已画的内容
         if self.mask_image.size() != rect.size():
-            self.mask_image = QImage(rect.size(), QImage.Format.Format_ARGB32_Premultiplied)
-            self.mask_image.fill(Qt.GlobalColor.transparent)
+            if not self.mask_image.isNull() and not rect.isEmpty():
+                self.mask_image = self.mask_image.scaled(
+                    rect.size(), 
+                    Qt.AspectRatioMode.IgnoreAspectRatio, 
+                    Qt.TransformationMode.SmoothTransformation
+                )
+            else:
+                self.mask_image = QImage(rect.size(), QImage.Format.Format_ARGB32_Premultiplied)
+                self.mask_image.fill(Qt.GlobalColor.transparent)
 
     def set_mosaic_pixmap(self, pixmap):
         """设置底层的马赛克效果图"""
@@ -74,7 +81,7 @@ class MosaicOverlay(QWidget):
         if self.mask_image.isNull(): return
 
         painter = QPainter(self.mask_image)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
         if self.mode == 'eraser':
             # 橡皮擦：清除 Alpha 通道
@@ -103,9 +110,13 @@ class MosaicOverlay(QWidget):
         display_img.fill(Qt.GlobalColor.transparent)
         
         p = QPainter(display_img)
-        # A. 画上全图马赛克
-        p.drawPixmap(0, 0, self.mosaic_pixmap)
-        # B. 使用 DestinationIn 模式绘制遮罩 (保留重叠部分的 Alpha)
+        
+        # 【关键修复】使用 drawPixmap(rect, pixmap) 进行拉伸绘制
+        # 确保马赛克底图完全填充当前控件区域，与底层图片严格对齐
+        # 之前是 p.drawPixmap(0, 0, self.mosaic_pixmap)，导致预览时马赛克错位
+        p.drawPixmap(self.rect(), self.mosaic_pixmap)
+        
+        # 使用 DestinationIn 模式绘制遮罩 (保留重叠部分的 Alpha)
         p.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
         p.drawImage(0, 0, self.mask_image)
         p.end()

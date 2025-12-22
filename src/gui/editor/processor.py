@@ -215,27 +215,33 @@ class ImageEditorEngine:
         
         if style == "pixel":
             # 像素风：缩小再放大
-            scale = 0.05 # 像素块大小
-            small = cv2.resize(img, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
+            scale = 0.02 # 像素块大小
+            # 确保缩放后尺寸至少为 1
+            sh = max(1, int(h * scale))
+            sw = max(1, int(w * scale))
+            # 先缩小 (使用 Linear 混合颜色，使格子颜色更代表区域平均值)
+            small = cv2.resize(img, (sw, sh), interpolation=cv2.INTER_LINEAR)
+            # 再放大回原图 (使用 Nearest 保持锯齿感)
             return cv2.resize(small, (w, h), interpolation=cv2.INTER_NEAREST)
+   
             
         elif style == "blur":
             # 毛玻璃：高斯模糊
-            ksize = max(1, int(min(w, h) * 0.05)) | 1 # 奇数
+            ksize = max(1, int(min(w, h) * 0.1)) | 1 # 奇数
             return cv2.GaussianBlur(img, (ksize, ksize), 0)
             
         elif style == "triangle":
-            # 模拟三角/晶格 (通过金字塔均值漂移或简单的多边形模拟，这里用简单的双边滤波+像素化模拟)
-            # 先模糊
-            blur = cv2.bilateralFilter(img, 9, 75, 75)
-            # 再像素化
-            scale = 0.08
-            small = cv2.resize(blur, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_LINEAR)
+            # 增强三角形/多边形马赛克的模糊度
+            blur = cv2.bilateralFilter(img, 15, 100, 100)
+            scale = 0.03 # 降低分辨率
+            sh = max(1, int(h * scale))
+            sw = max(1, int(w * scale))
+            small = cv2.resize(blur, (sw, sh), interpolation=cv2.INTER_LINEAR)
             return cv2.resize(small, (w, h), interpolation=cv2.INTER_NEAREST)
-            
+             
         elif style == "hexagon":
             # 模拟纹理 (这里简单用中值模糊模拟油画感/去噪点)
-            ksize = max(1, int(min(w, h) * 0.02)) | 1
+            ksize = max(1, int(min(w, h) * 0.05)) | 1
             return cv2.medianBlur(img, ksize)
             
         return img
