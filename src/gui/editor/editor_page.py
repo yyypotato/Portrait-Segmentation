@@ -76,7 +76,7 @@ class EditorPage(QWidget):
         # Top Bar
         top_bar = QWidget()
         top_bar.setFixedHeight(50)
-        top_bar.setStyleSheet("background-color: #1e272e; border-bottom: 1px solid #2d3436;")
+        top_bar.setStyleSheet("background-color: #141824; color: white;")
         top_layout = QHBoxLayout(top_bar)
         top_layout.setContentsMargins(15, 0, 15, 0)
         
@@ -100,6 +100,7 @@ class EditorPage(QWidget):
 
         # Canvas
         canvas_container = QWidget()
+        canvas_container.setStyleSheet("background-color: #141824; color: white;")
         self.canvas_layout = QVBoxLayout(canvas_container)
         self.canvas_layout.setContentsMargins(0,0,0,0)
         self.canvas = EditorCanvas()
@@ -129,7 +130,7 @@ class EditorPage(QWidget):
         # Bottom Panel
         bottom_panel = QWidget()
         bottom_panel.setFixedHeight(240)
-        bottom_panel.setStyleSheet("background-color: #1e272e; border-top: 1px solid #2d3436;")
+        bottom_panel.setStyleSheet("background-color: #141824; color: white;")
         bottom_layout = QVBoxLayout(bottom_panel)
         bottom_layout.setContentsMargins(0, 10, 0, 10)
         bottom_layout.setSpacing(5)
