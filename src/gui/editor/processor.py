@@ -36,7 +36,16 @@ class ImageEditorEngine:
         max_dim = 2000
         if max(h, w) > max_dim:
             scale = max_dim / max(h, w)
-            img = cv2.resize(img, (0, 0), fx=scale, fy=scale)
+            new_w = int(w * scale)
+            new_h = int(h * scale)
+            
+            # 【关键修复1】确保宽度是 4 的倍数
+            # QImage 默认要求每行字节数 4 字节对齐，如果宽度不对齐，显示时会花屏/倾斜
+            new_w = (new_w // 4) * 4
+            if new_w <= 0: new_w = 4
+            
+            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
             
         self.original_image = img
         self.preview_image = img.copy()
@@ -79,28 +88,43 @@ class ImageEditorEngine:
             
         # 对比度
         if self.params["contrast"] != 0:
-            alpha = 1.0 + self.params["contrast"] / 100.0
-            img = cv2.addWeighted(img, alpha, img, 0, 128 * (1 - alpha))
-            
-        # 饱和度
-        if self.params["saturation"] != 0:
-            hsv = cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_RGB2HSV).astype(np.float32)
-            hsv[:, :, 1] *= (1.0 + self.params["saturation"] / 100.0)
-            hsv[:, :, 1] = np.clip(hsv[:, :, 1], 0, 255)
-            img = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB).astype(np.float32)
+            # 使用 (x - 127.5) * f + 127.5 公式，保持中间灰度不变
+            f = 1.0 + self.params["contrast"] / 100.0
+            img = (img - 127.5) * f + 127.5
 
-        # 色相
-        if self.params["hue"] != 0:
-            hsv = cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_RGB2HSV).astype(np.float32)
-            hsv[:, :, 0] = (hsv[:, :, 0] + self.params["hue"]) % 180
-            img = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB).astype(np.float32)
-
+        # 【关键修复】在转 uint8 之前必须 clip，否则负数或 >255 的数会回绕 (例如 -5 变成 251)
+        # 这会导致调节对比度时出现杂色噪点
         img = np.clip(img, 0, 255).astype(np.uint8)
+
+        # 饱和度 & 色相 (合并在 HSV 空间处理)
+        if self.params["saturation"] != 0 or self.params["hue"] != 0:
+            hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV).astype(np.float32)
+            
+            # 色相
+            if self.params["hue"] != 0:
+                # OpenCV H 范围 0-180
+                hsv[:, :, 0] = (hsv[:, :, 0] + (self.params["hue"] / 2.0)) % 180
+            
+            # 饱和度
+            if self.params["saturation"] != 0:
+                scale = 1.0 + self.params["saturation"] / 100.0
+                hsv[:, :, 1] *= scale
+            
+            hsv = np.clip(hsv, 0, 255).astype(np.uint8)
+            img = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+
+        # 转回 float32 继续处理锐化
+        img = img.astype(np.float32)
+
 
         # 锐化 (USM)
         if self.params["sharpness"] > 0:
             blur = cv2.GaussianBlur(img, (0, 0), 3)
             img = cv2.addWeighted(img, 1.5 + self.params["sharpness"]/100.0, blur, -0.5 - self.params["sharpness"]/100.0, 0)
+
+        # 【关键修复2】处理完所有数值计算后，必须转回 uint8
+        # 如果这里返回 float32，QImage 显示时就会全是噪点/花屏
+        img = np.clip(img, 0, 255).astype(np.uint8)
 
         # 2. 滤镜
         if self.current_filter != "original":
@@ -141,7 +165,8 @@ class ImageEditorEngine:
             if cw > 0 and ch > 0:
                 img = img[y:y+ch, x:x+cw]
 
-        return img
+        # 【关键修复3】确保返回连续内存数组，防止 QImage 显示异常
+        return np.ascontiguousarray(img)
 
     def apply_doodle_layer(self, doodle_pixmap, current_display_img):
         """
