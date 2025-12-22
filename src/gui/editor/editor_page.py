@@ -147,7 +147,7 @@ class EditorPage(QWidget):
         self.sub_tool_stack.addWidget(self.create_mosaic_tools()) # 4
         self.sub_tool_stack.addWidget(self.create_label_tools())  # 5 (新增)
         self.sub_tool_stack.addWidget(self.create_sticker_tools()) # 6 (新增)
-        self.sub_tool_stack.addWidget(QLabel("")) # 调整占位符
+        self.sub_tool_stack.addWidget(self.create_frame_tools()) # 7 (新增)
 
 
         category_scroll = self.create_scroll_area()
@@ -656,6 +656,16 @@ class EditorPage(QWidget):
                 self.update_sticker_geometry()
                 self.show_action_bar("Sticker", self.save_sticker, self.cancel_sticker)
 
+        elif index == 7: # Frame (新增)
+            img = self.engine.render(use_preview=True, include_crop=True)
+            if img is not None:
+                self.canvas.set_image(img)
+                # 默认选中第一个（无相框）
+                if hasattr(self, 'frame_btns') and self.frame_btns:
+                    self.apply_frame_preview("none", self.frame_btns[0])
+                else:
+                    self.show_action_bar("Frame", self.save_frame, self.cancel_frame)
+
         else: # Adjust, Filter, etc.
             img = self.engine.render(use_preview=True, include_crop=True)
             if img is not None:
@@ -729,6 +739,171 @@ class EditorPage(QWidget):
     def cancel_sticker(self):
         self.sticker_overlay.clear()
         self.sticker_overlay.hide()
+        self.hide_action_bar()
+        self.switch_category(1, self.cat_btns[1])
+
+    def create_frame_tools(self):
+        """创建相框工具栏"""
+        scroll = self.create_scroll_area()
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(10, 0, 10, 0)
+        layout.setSpacing(15)
+        
+        # 定义相框类型：(图标key, 显示名称, 内部逻辑key)
+        frames = [
+            ("frame_none", "无", "none"),
+            ("frame_white", "白边", "white"),
+            ("frame_black", "黑边", "black"),
+            ("frame_polaroid", "拍立得", "polaroid"),
+            ("frame_wood", "木质", "wood"),
+            ("frame_film", "胶卷", "film"), # 新增胶卷风格
+            ("frame_line", "线条", "line")  # 新增简约线条风格
+        ]
+        
+        self.frame_btns = []
+        for icon, name, key in frames:
+            btn = IconButton(icon, name, is_small=True)
+            # 修复：确保图标颜色正确
+            if icon == "frame_white":
+                # 白边图标如果是白色的，在深色背景下可能看不清，这里不做特殊处理，依赖 IconButton 的样式
+                pass
+            btn.clicked.connect(lambda c, k=key, b=btn: self.apply_frame_preview(k, b))
+            layout.addWidget(btn)
+            self.frame_btns.append(btn)
+            
+        layout.addStretch()
+        scroll.setWidget(widget)
+        return scroll
+
+    def apply_frame_preview(self, frame_type, btn_sender):
+        """应用相框预览"""
+        for btn in self.frame_btns: btn.setChecked(False)
+        btn_sender.setChecked(True)
+        
+        self.current_frame_type = frame_type
+        
+        # 获取当前渲染图像
+        current_img = self.engine.render(use_preview=True, include_crop=True)
+        if current_img is None: return
+        
+        # 生成带相框的图像
+        framed_img = self.generate_framed_image(current_img, frame_type)
+        
+        # 显示预览
+        self.canvas.set_image(framed_img)
+        self.show_action_bar("Frame", self.save_frame, self.cancel_frame)
+
+    def generate_framed_image(self, img, frame_type):
+        """
+        生成带相框的图像逻辑
+        :param img: 原始图像 (RGB numpy array)
+        :param frame_type: 相框类型字符串
+        :return: 处理后的图像
+        """
+        if frame_type == "none":
+            return img.copy()
+            
+        h, w = img.shape[:2]
+        min_dim = min(w, h)
+        
+        if frame_type == "white":
+            # 添加 5% 白色边框
+            border = int(min_dim * 0.05)
+            return cv2.copyMakeBorder(img, border, border, border, border, cv2.BORDER_CONSTANT, value=[255, 255, 255])
+            
+        elif frame_type == "black":
+            # 添加 5% 黑色边框
+            border = int(min_dim * 0.05)
+            return cv2.copyMakeBorder(img, border, border, border, border, cv2.BORDER_CONSTANT, value=[0, 0, 0])
+            
+        elif frame_type == "polaroid":
+            # 拍立得风格：四周白边，底部留宽白边用于写字
+            border_side = int(min_dim * 0.05)
+            border_bottom = int(min_dim * 0.25)
+            return cv2.copyMakeBorder(img, border_side, border_bottom, border_side, border_side, cv2.BORDER_CONSTANT, value=[255, 255, 255])
+            
+        elif frame_type == "wood":
+            # 木质边框：使用深棕色填充
+            border = int(min_dim * 0.08)
+            # RGB 颜色 [139, 69, 19] (SaddleBrown)
+            return cv2.copyMakeBorder(img, border, border, border, border, cv2.BORDER_CONSTANT, value=[139, 69, 19])
+            
+        elif frame_type == "film":
+            # 胶卷风格：上下黑色电影边框，模拟胶片孔
+            border_y = int(h * 0.12) # 上下边框较宽
+            border_x = int(w * 0.02) # 左右微边
+            
+            # 1. 扩展黑色边框
+            res = cv2.copyMakeBorder(img, border_y, border_y, border_x, border_x, cv2.BORDER_CONSTANT, value=[20, 20, 20])
+            
+            # 2. 绘制胶卷孔 (白色小矩形)
+            hole_h = int(border_y * 0.5)
+            hole_w = int(hole_h * 0.7)
+            hole_margin_top = int((border_y - hole_h) / 2)
+            hole_gap = int(hole_w * 0.8) # 孔间距
+            
+            # 绘制上方孔洞
+            for x in range(0, res.shape[1], hole_w + hole_gap):
+                cv2.rectangle(res, (x, hole_margin_top), (x + hole_w, hole_margin_top + hole_h), (220, 220, 220), -1)
+                
+            # 绘制下方孔洞
+            hole_margin_bottom = res.shape[0] - border_y + hole_margin_top
+            for x in range(0, res.shape[1], hole_w + hole_gap):
+                cv2.rectangle(res, (x, hole_margin_bottom), (x + hole_w, hole_margin_bottom + hole_h), (220, 220, 220), -1)
+                
+            return res
+
+        elif frame_type == "line":
+            # 简约线条：外层宽白边 + 内层细黑线
+            border_outer = int(min_dim * 0.1)
+            # 1. 加宽白边
+            res = cv2.copyMakeBorder(img, border_outer, border_outer, border_outer, border_outer, cv2.BORDER_CONSTANT, value=[255, 255, 255])
+            
+            # 2. 绘制内框线
+            line_thickness = max(1, int(min_dim * 0.003))
+            margin = int(border_outer * 0.4)
+            
+            # 计算内框坐标
+            pt1 = (margin, margin)
+            pt2 = (res.shape[1] - margin, res.shape[0] - margin)
+            cv2.rectangle(res, pt1, pt2, (80, 80, 80), line_thickness)
+            
+            return res
+        
+        return img
+    def save_frame(self):
+        if self.engine.original_image is None: return
+        
+        # 1. 获取当前基础图像
+        current_img = self.engine.render(use_preview=True, include_crop=True)
+        
+        # 2. 应用相框
+        if hasattr(self, 'current_frame_type'):
+            final_img = self.generate_framed_image(current_img, self.current_frame_type)
+            
+            # 3. 更新 Engine
+            # 注意：相框改变了图像尺寸，我们需要更新 original_image 并重置几何参数
+            # 这是一个破坏性操作，会将之前的滤镜、裁剪等“烘焙”到新底图中
+            self.engine.original_image = final_img
+            self.engine.preview_image = final_img
+            
+            # 重置裁剪和旋转，因为它们已经应用在 final_img 中了
+            self.engine.geo_params["crop_rect"] = None
+            self.engine.geo_params["rotate_angle"] = 0
+            self.engine.geo_params["rotate_90"] = 0
+            self.engine.geo_params["flip_h"] = False
+            
+            self.canvas.set_image(final_img)
+            
+        self.hide_action_bar()
+        self.switch_category(1, self.cat_btns[1])
+
+    def cancel_frame(self):
+        # 恢复原图显示
+        img = self.engine.render(use_preview=True, include_crop=True)
+        if img is not None:
+            self.canvas.set_image(img)
         self.hide_action_bar()
         self.switch_category(1, self.cat_btns[1])
 

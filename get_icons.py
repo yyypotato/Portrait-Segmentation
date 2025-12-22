@@ -21,6 +21,10 @@ for cat in categories:
 
 # 2. 定义图标映射
 base_url = "https://raw.githubusercontent.com/google/material-design-icons/master/png"
+# 使用 Icons8 的 iOS 线性风格 (匹配截图中的轮廓感)
+ios_base = "https://img.icons8.com/ios/100"
+# 彩色图标 (用于木质相框)
+color_base = "https://img.icons8.com/color/100"
 
 # 创建 SSL 上下文，忽略证书验证 (防止某些环境下的 SSL 错误)
 try:
@@ -125,12 +129,15 @@ icons = {
     "cat_mood":       f"{base_url}/social/emoji_emotions/materialicons/24dp/2x/baseline_emoji_emotions_black_24dp.png",
     "cat_text":       f"{base_url}/editor/title/materialicons/24dp/2x/baseline_title_black_24dp.png",
 
-    # --- 相框图标 (新增) ---
-    "frame_none":     f"{base_url}/content/block/materialicons/24dp/2x/baseline_block_black_24dp.png",
-    "frame_white":    f"{base_url}/image/crop_square/materialicons/24dp/2x/baseline_crop_square_black_24dp.png",
-    "frame_black":    f"{base_url}/image/filter_frames/materialicons/24dp/2x/baseline_filter_frames_black_24dp.png",
-    "frame_polaroid": f"{base_url}/image/portrait/materialicons/24dp/2x/baseline_portrait_black_24dp.png",
-    "frame_wood":     f"{base_url}/image/texture/materialicons/24dp/2x/baseline_texture_black_24dp.png",
+    # --- 相框 (使用最基础、验证过的文件名) ---
+    "frame_none":     f"{ios_base}/ffffff/cancel.png",       # 禁止符号
+    "frame_white":    f"{ios_base}/ffffff/square.png",    # 恢复为 square (之前成功过)
+    "frame_black":    f"{ios_base}/555555/square.png",    # 恢复为 square
+    "frame_polaroid": f"{ios_base}/ffffff/picture.png",   # 使用 picture (更通用)
+    "frame_wood":     f"{color_base}/frame.png",          # 恢复为 frame (之前成功过)
+    "frame_film":     f"{ios_base}/ffffff/video.png",     # 使用 video (更通用)
+    "frame_line":     f"{ios_base}/ffffff/rectangle.png", # 保持 rectangle
+
 
 }
 labels = {
