@@ -45,13 +45,11 @@ class StickerOverlay(QWidget):
         # 加载 UI 图标
         self.icon_delete = QPixmap(os.path.join("resources", "icons", "delete_x.png"))
         if self.icon_delete.isNull():
-            # 备用：红色方块
             self.icon_delete = QPixmap(24, 24)
             self.icon_delete.fill(Qt.GlobalColor.red)
             
         self.icon_resize = QPixmap(os.path.join("resources", "icons", "resize_handle.png"))
         if self.icon_resize.isNull():
-            # 备用：蓝色方块
             self.icon_resize = QPixmap(24, 24)
             self.icon_resize.fill(Qt.GlobalColor.blue)
 
@@ -76,6 +74,7 @@ class StickerOverlay(QWidget):
 
     def get_result_image(self, bg_size):
         """生成透明背景的贴纸层图片"""
+        # Format_ARGB32_Premultiplied 在 Windows (Little Endian) 上内存顺序通常是 B G R A
         img = QImage(bg_size, QImage.Format.Format_ARGB32_Premultiplied)
         img.fill(Qt.GlobalColor.transparent)
         painter = QPainter(img)
@@ -118,12 +117,10 @@ class StickerOverlay(QWidget):
                 half_sz = icon_sz / 2
                 
                 # 左上角：删除
-                # 位置：(-w/2, -h/2)
                 painter.drawPixmap(int(-item.width/2 - half_sz), int(-item.height/2 - half_sz), 
                                  icon_sz, icon_sz, self.icon_delete)
                 
                 # 右下角：旋转/缩放
-                # 位置：(w/2, h/2)
                 painter.drawPixmap(int(item.width/2 - half_sz), int(item.height/2 - half_sz), 
                                  icon_sz, icon_sz, self.icon_resize)
                 
@@ -139,7 +136,7 @@ class StickerOverlay(QWidget):
             
             # 检查删除按钮 (左上角)
             tl = QPointF(-item.width/2, -item.height/2)
-            if (local_pos - tl).manhattanLength() < 25: # 增加一点点击范围
+            if (local_pos - tl).manhattanLength() < 25: 
                 self.items.remove(item)
                 self.selected_item = None
                 self.update()
@@ -152,7 +149,7 @@ class StickerOverlay(QWidget):
                 self._last_pos = pos
                 return
 
-        # 2. 检查是否点击了贴纸本体 (倒序遍历，优先选中最上层)
+        # 2. 检查是否点击了贴纸本体 (倒序遍历)
         clicked_item = None
         for item in reversed(self.items):
             local_pos = self._map_to_local(item, pos)
@@ -162,7 +159,7 @@ class StickerOverlay(QWidget):
         
         if clicked_item:
             self.selected_item = clicked_item
-            # 将选中的移到列表末尾（渲染在最上层）
+            # 移到最上层
             self.items.remove(clicked_item)
             self.items.append(clicked_item)
             
@@ -190,23 +187,18 @@ class StickerOverlay(QWidget):
             dx = pos.x() - item.x
             dy = pos.y() - item.y
             
-            # 1. 旋转 (atan2)
+            # 1. 旋转
             angle = math.degrees(math.atan2(dy, dx))
-            # 修正角度：手柄在右下角，相对于中心的角度取决于宽高比
-            # 简单做法：假设手柄方向就是新的右下角方向
+            # 修正角度：假设手柄在右下角
             base_angle = math.degrees(math.atan2(item.height, item.width))
             item.angle = angle - base_angle
             
-            # 2. 缩放 (距离)
+            # 2. 缩放
             dist = math.sqrt(dx*dx + dy*dy)
-            # dist 是中心到角的距离 (半对角线)
-            # 对角线长度 = dist * 2
-            # 根据宽高比反推宽
-            # w^2 + h^2 = diag^2  =>  w^2 + (w/ratio)^2 = diag^2
             diag = dist * 2
             new_w = diag / math.sqrt(1 + 1/(item.ratio**2))
             
-            item.width = max(30, new_w) # 最小宽度限制
+            item.width = max(30, new_w)
             item.height = item.width / item.ratio
             
         self.update()
@@ -215,7 +207,7 @@ class StickerOverlay(QWidget):
         self._mode = None
 
     def _map_to_local(self, item, global_pos):
-        """将全局坐标映射到贴纸的局部坐标系 (未旋转，中心为0,0)"""
+        """将全局坐标映射到贴纸的局部坐标系"""
         t = QTransform()
         t.translate(item.x, item.y)
         t.rotate(item.angle)

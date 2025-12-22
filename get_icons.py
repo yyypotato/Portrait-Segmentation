@@ -125,6 +125,13 @@ icons = {
     "cat_mood":       f"{base_url}/social/emoji_emotions/materialicons/24dp/2x/baseline_emoji_emotions_black_24dp.png",
     "cat_text":       f"{base_url}/editor/title/materialicons/24dp/2x/baseline_title_black_24dp.png",
 
+    # --- 相框图标 (新增) ---
+    "frame_none":     f"{base_url}/content/block/materialicons/24dp/2x/baseline_block_black_24dp.png",
+    "frame_white":    f"{base_url}/image/crop_square/materialicons/24dp/2x/baseline_crop_square_black_24dp.png",
+    "frame_black":    f"{base_url}/image/filter_frames/materialicons/24dp/2x/baseline_filter_frames_black_24dp.png",
+    "frame_polaroid": f"{base_url}/image/portrait/materialicons/24dp/2x/baseline_portrait_black_24dp.png",
+    "frame_wood":     f"{base_url}/image/texture/materialicons/24dp/2x/baseline_texture_black_24dp.png",
+
 }
 labels = {
     "bubble_oval": "https://img.icons8.com/ios-filled/100/ffffff/speech-bubble.png",

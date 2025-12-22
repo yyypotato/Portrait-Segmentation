@@ -205,16 +205,31 @@ class EditorPage(QWidget):
         
         # 使用 TabWidget 分类显示贴纸
         tab_widget = QTabWidget()
-        # 修改样式：Tab 居中，去掉边框
+        # 设置图标大小
+        tab_widget.setIconSize(QSize(28, 28))
+        
+        # 优化样式：增加 Tab 宽度，确保图标居中，增加内边距
         tab_widget.setStyleSheet("""
             QTabWidget::pane { border: none; }
-            QTabBar::tab { background: transparent; padding: 8px 12px; }
-            QTabBar::tab:selected { background: rgba(255, 255, 255, 0.1); border-radius: 5px; }
+            QTabBar::tab { 
+                background: transparent; 
+                padding: 8px 12px; 
+                min-width: 40px; 
+                margin-right: 2px;
+            }
+            QTabBar::tab:selected { 
+                background: rgba(255, 255, 255, 0.1); 
+                border-radius: 4px; 
+            }
+            QTabBar::tab:hover {
+                background: rgba(255, 255, 255, 0.05);
+                border-radius: 4px;
+            }
         """)
         
         categories = ["time", "location", "food", "drink", "mood", "text"]
         base_path = os.path.join("resources", "images", "stickers")
-        icon_base_path = os.path.join("resources", "icons") # 假设图标在这里
+        icon_base_path = os.path.join("resources", "icons") 
         
         for cat in categories:
             cat_path = os.path.join(base_path, cat)
@@ -224,7 +239,7 @@ class EditorPage(QWidget):
             scroll.setFixedHeight(90)
             
             content_widget = QWidget()
-            grid = QHBoxLayout(content_widget) # 使用水平布局横向滚动
+            grid = QHBoxLayout(content_widget) 
             grid.setSpacing(10)
             grid.setContentsMargins(10, 5, 10, 5)
             
@@ -243,20 +258,40 @@ class EditorPage(QWidget):
             grid.addStretch()
             scroll.setWidget(content_widget)
             
-            # --- 修改部分：尝试加载图标 ---
-            # 尝试查找 resources/icons/time.png 等
-            icon_path = os.path.join(icon_base_path, f"{cat}.png")
+            # --- 修复：加载图标逻辑增强 ---
+            # 优先查找小写文件名，如果不存在则查找首字母大写文件名
+            icon_path = os.path.join(icon_base_path, f"cat_{cat}.png")
+            if not os.path.exists(icon_path):
+                icon_path = os.path.join(icon_base_path, f"{cat.capitalize()}.png")
+            
             if os.path.exists(icon_path):
-                # 如果找到图标，使用图标，不显示文字
-                tab_widget.addTab(scroll, QIcon(icon_path), "")
+                # 使用图标，不显示文字
+                themed_icon = self.load_themed_icon(icon_path, "#b2bec3") 
+                idx = tab_widget.addTab(scroll, themed_icon, "")
+                tab_widget.setTabToolTip(idx, cat.capitalize())
             else:
-                # 如果没找到，回退到显示文字
+                # 回退到文字
                 tab_widget.addTab(scroll, cat.capitalize())
-            # ---------------------------
+            # --------------------
             
         layout.addWidget(tab_widget)
         return container
-
+    
+    def load_themed_icon(self, path, color="#b2bec3"):
+        """加载图片并将其非透明区域着色为指定颜色"""
+        if not os.path.exists(path): return QIcon()
+        
+        pixmap = QPixmap(path)
+        if pixmap.isNull(): return QIcon()
+        
+        # 使用 Painter 对图标进行着色
+        painter = QPainter(pixmap)
+        # SourceIn 模式：只在原图非透明区域绘制颜色
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        painter.fillRect(pixmap.rect(), QColor(color))
+        painter.end()
+        
+        return QIcon(pixmap)
     def create_scroll_area(self):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -641,38 +676,38 @@ class EditorPage(QWidget):
             self.cancel_sticker()
             return
             
-        # 1. 获取贴纸层图片 (透明背景)
+        # 1. 获取贴纸层图片 (QImage ARGB32)
         sticker_img_qt = self.sticker_overlay.get_result_image(self.sticker_overlay.size())
         
-        # 2. 转换为 Numpy 格式以便合并
+        # 2. 转换为 Numpy 格式
+        # QImage.bits() 返回的数据在 Windows 上通常是 BGRA 顺序
         ptr = sticker_img_qt.bits()
         ptr.setsize(sticker_img_qt.height() * sticker_img_qt.width() * 4)
         arr = np.frombuffer(ptr, np.uint8).reshape((sticker_img_qt.height(), sticker_img_qt.width(), 4))
-        # QImage 是 ARGB 或 RGBA，OpenCV 需要 BGR。这里我们只需要 Alpha 通道做混合
-        sticker_arr = arr.copy() # 拷贝一份
         
-        # 3. 获取当前底图
+        # 3. 获取当前底图 (RGB)
         current_img = self.engine.render(use_preview=True, include_crop=True)
         if current_img is None: return
         
-        # 4. 混合 (简单的 Alpha Blending)
-        # 注意：sticker_arr 是 RGBA (Qt) 或 BGRA，取决于系统。通常 QImage.Format_ARGB32_Premultiplied 内存布局是 B G R A
-        # 我们需要确保尺寸一致
-        if sticker_arr.shape[:2] != current_img.shape[:2]:
-            sticker_arr = cv2.resize(sticker_arr, (current_img.shape[1], current_img.shape[0]))
+        # 4. 颜色空间修正与混合
+        # arr 是 BGRA，current_img 是 RGB
+        # 我们需要将 arr 转换为 RGBA 以匹配 current_img 的通道顺序
+        sticker_rgba = cv2.cvtColor(arr, cv2.COLOR_BGRA2RGBA)
+        
+        # 调整尺寸
+        if sticker_rgba.shape[:2] != current_img.shape[:2]:
+            sticker_rgba = cv2.resize(sticker_rgba, (current_img.shape[1], current_img.shape[0]))
             
         # 分离通道
-        b, g, r, a = cv2.split(sticker_arr)
-        overlay_color = cv2.merge((b, g, r))
+        r, g, b, a = cv2.split(sticker_rgba)
+        overlay_rgb = cv2.merge((r, g, b))
         
         # 归一化 Alpha
         mask = a / 255.0
         
         # 混合
-        # current_img 是 BGR
-        # 确保 current_img 是 float 以便计算
         src = current_img.astype(float)
-        ovr = overlay_color.astype(float)
+        ovr = overlay_rgb.astype(float)
         
         # 逐通道混合
         for c in range(3):
@@ -682,9 +717,6 @@ class EditorPage(QWidget):
         
         # 5. 更新 Engine
         self.engine.preview_image = merged_img
-        # 更新 original_image (需要 resize 回原图尺寸，这里简化处理，直接用 preview 覆盖 original 会导致画质损失，
-        # 严谨做法是在原图尺寸上重新渲染贴纸，但 StickerOverlay 是基于屏幕坐标的。
-        # 这里的折中方案是将 merged_img 放大回原图尺寸，或者接受当前分辨率)
         self.engine.original_image = cv2.resize(merged_img, 
                                                 (self.engine.original_image.shape[1], self.engine.original_image.shape[0]))
         
