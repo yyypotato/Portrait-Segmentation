@@ -6,22 +6,30 @@
 
 一个基于 **PyQt6 + PyTorch** 的桌面端人像分割工具，支持 **DeepLabV3**（预训练权重自动下载/本地缓存）与 **U-Net**（可训练/可加载自定义权重），并内置图片编辑器（裁剪、滤镜、涂鸦、马赛克、贴纸、标签等）。
 
-
 ---
 
 ## ✨ 功能特性
 
-### 人像分割
-- **DeepLabV3+ ResNet101 / MobileNetV3**：开箱即用，首次运行自动下载权重并缓存到本地
-- **U-Net（自定义）**：支持训练后加载 `resources/weights/unet_portrait.pth`
-- **背景替换/合成**：将分割出的人像与背景图合成
-- **结果保存**：保存透明 PNG 或合成图
+### 🧠 智能人像分割
+- **多模型支持**：
+  - **DeepLabV3+ (ResNet101)**：高精度，适合高质量输出。
+  - **DeepLabV3+ (MobileNetV3)**：轻量级，速度快，适合低配设备。
+  - **U-Net**：支持加载自定义训练的权重（例如：`resources/weights/unet_portrait_v2.pth`）。
+- **蒙版修正 (Refine)**：支持使用画笔/橡皮擦手动修补分割蒙版，处理发丝等细节。
+- **背景替换**：一键替换背景，支持光影融合（Harmonization）与边缘光效（Light Wrap）（以项目实现为准）。
 
-### 图片编辑器（Editor）
-- **基础调节**：亮度、对比度、饱和度、色相、锐化等
-- **几何变换**：裁剪、旋转、翻转
-- **创作工具**：涂鸦、马赛克（像素/模糊等）、贴纸、标签叠加
-- **滤镜**：内置多种风格滤镜
+### 🎨 全能图片编辑器
+- **基础调节**：亮度、对比度、饱和度、色相、锐化、高光/阴影。
+- **几何变换**：自由裁剪、旋转、翻转。
+- **创作工具**：
+  - **涂鸦**
+  - **马赛克**
+  - **贴纸 & 标签**
+  - **相框**
+
+### 📂 工作流管理
+- **工作台 (Workbench)**：自动记录最近编辑项目，支持快速恢复。
+- **历史 (History)**：查看历史导出记录（以项目实现为准）。
 
 ---
 
@@ -30,70 +38,92 @@
 ```text
 PortraitSeg/
 ├─ main.py
+├─ train_unet.py
+├─ get_icons.py
 ├─ requirements.txt
 ├─ README.md
 ├─ .gitignore
 ├─ .vscode/
 │  └─ launch.json
-├─ output/                      # 运行输出（自动创建）
 ├─ resources/
-│  ├─ images/
-│  │  ├─ person/                # 测试人像
-│  │  └─ background/            # 测试背景
+│  ├─ config/
+│  │  └─ recent_files.json
+│  ├─ icons/
+│  ├─ images/                   # 若存在：person/background/stickers 等
 │  └─ weights/
-│     └─ hub/checkpoints/       # torchvision 权重缓存（自动下载）
-├─ config/                      # 预留（目前为空，可放 YAML/JSON 配置）
+│     └─ hub/
+│        └─ checkpoints/
 └─ src/
    ├─ gui/
    │  ├─ main_window.py
    │  ├─ menu_page.py
    │  ├─ seg_page.py
+   │  ├─ workbench_page.py
+   │  ├─ history_page.py
    │  ├─ help_page.py
-   │  └─ styles.py
+   │  ├─ splash_screen.py
+   │  ├─ styles.py
+   │  ├─ custom_widgets.py
+   │  ├─ mask_refine_overlay.py
+   │  └─ editor/
+   │     ├─ editor_page.py
+   │     ├─ processor.py
+   │     ├─ canvas.py
+   │     ├─ filters.py
+   │     ├─ ui_components.py
+   │     ├─ crop_overlay.py
+   │     ├─ doodle_overlay.py
+   │     ├─ mosaic_overlay.py
+   │     ├─ sticker_overlay.py
+   │     └─ label_overlay.py
    ├─ models/
+   │  ├─ __init__.py
+   │  ├─ factory.py
    │  ├─ base_model.py
    │  ├─ config.py
-   │  ├─ factory.py
    │  └─ architectures/
    │     ├─ deeplab.py
-   │     └─ unet.py             # 占位/可扩展
-   └─ utils/                    # 预留
+   │     ├─ unet.py
+   │     ├─ unet_model.py
+   │     └─ unet_parts.py
+   └─ utils/
+      └─ image_processor.py
 ```
 
 ---
 
 ## ✅ 环境与安装（Quick Start）
 
-### 1) 创建虚拟环境（推荐 Conda）
-
+### 1) 创建虚拟环境（Conda）
 ```bash
-conda create -n portraitSeg python=3.11.14 -y
+conda create -n portraitSeg python=3.11 -y
 conda activate portraitSeg
 ```
 
 ### 2) 安装依赖
+由于 PyTorch 的 GPU 版本需要匹配本地 CUDA 环境，建议先装 PyTorch，再装其余依赖。
 
-您当前的 `requirements.txt` 包含 `torch==2.7.1+cu118` 这类 **CUDA 特定构建**，在某些情况下直接 `pip install -r requirements.txt` 可能会因为下载源不同而失败。更稳妥的方式是：
+**A. 安装 PyTorch（按官方命令）**  
+访问：https://pytorch.org/get-started/locally/
 
-#### A. GPU（NVIDIA）版本（推荐）
-先按 PyTorch 官方方式安装对应 CUDA 版本的 torch/torchvision，然后再安装其余依赖。
+> 示例（仅示意，请以官网为准）  
+```bash
+# CUDA 11.8 示例
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+```
 
-示例（请以 PyTorch 官网为准）：  
-https://pytorch.org/get-started/locally/
-
-#### B. CPU 版本
-如果没有 NVIDIA GPU 或不想用 GPU，可安装 CPU 版 torch/torchvision。
-
-安装完 torch/torchvision 后，再安装其它依赖：
-
+**B. 安装项目其余依赖**
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3) 运行
+### 3) 准备图标资源（如果项目需要）
+```bash
+python get_icons.py
+```
 
+### 4) 运行
 在项目根目录执行：
-
 ```bash
 python main.py
 ```
@@ -104,31 +134,58 @@ python main.py
 
 ## 🧠 模型权重下载到哪里？
 
-项目中 `src/models/architectures/deeplab.py` 里设置了：
-
-- `TORCH_HOME = ./resources/weights`
-
-因此 `torchvision` 自动下载的权重会落在类似路径：
+项目在 `src/models/architectures/deeplab.py` 中设置了本地权重目录（`TORCH_HOME = ./resources/weights`），因此 `torchvision` 自动下载的权重会落在：
 
 ```text
 resources/weights/hub/checkpoints/
 ```
 
-您当前目录中已存在示例权重：
-
+例如：
 ```text
 resources/weights/hub/checkpoints/deeplabv3_resnet101_coco-586e9e4e.pth
 ```
+
+## 🏋️ U-Net 训练（可选）
+
+如果你希望使用/替换自己的 U-Net 权重，可以通过项目自带脚本训练。
+
+### 1) 数据准备（建议）
+准备训练集与验证集（图像与掩码一一对应）：
+
+- 图像：RGB/JPG/PNG
+- 掩码：单通道（0=背景，255=人像）或等价的二值掩码
+
+> 具体数据目录结构以 `train_unet.py` 内的路径配置为准。
+
+### 2) 开始训练
+在项目根目录执行：
+
+```bash
+python train_unet.py
+```
+
+训练过程中会在终端输出 loss 等信息。
+
+### 3) 权重输出位置
+训练完成后，将生成/更新权重文件，位置位于：
+
+```text
+resources/weights/unet_portrait_v2.pth
+```
+
+### 4) 在应用中使用训练好的权重
+- 将生成的 `.pth` 权重放到上面的路径（或替换同名文件）。
+- 重启应用，在模型下拉框中选择 **U-Net**。
 
 ---
 
 ## 🖥️ 使用说明（GUI 工作流）
 
 1. 打开应用，进入分割页面  
-2. **上传图像**（建议从 `resources/images/person/` 选择测试图）
-3. **选择模型**（下拉框）
-4. 点击 **开始分割**
-5. 选择背景图（建议从 `resources/images/background/`）
-6. 保存分割结果 / 合成结果（默认建议保存到 `output/`）
+2. 上传图像  
+3. 选择模型（下拉框）  
+4. 点击 **开始分割**  
+5. 选择背景图进行合成（可选）  
+6. 保存分割结果 / 合成结果（建议保存到 `output/`）
 
 ---
