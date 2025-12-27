@@ -46,7 +46,10 @@ datasets/EG1800/images/*
 datasets/EG1800/masks/*
 !datasets/EG1800/images/.gitkeep
 !datasets/EG1800/masks/.gitkeep
-
+datasets/EG1800_Portrait/images/*
+datasets/EG1800_Portrait/masks/*
+!datasets/EG1800_Portrait/images/.gitkeep
+!datasets/EG1800_Portrait/masks/.gitkeep
 # --- Outputs ---
 output/
 results/
