@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QLabel, QStackedWidget, QFileDialog, QScrollArea, QFrame, 
-                             QScroller, QScrollerProperties, QSlider, QColorDialog, QTabWidget)
+                             QScroller, QMessageBox, QScrollerProperties, QSlider, QColorDialog, QTabWidget)
 from PyQt6.QtCore import Qt, pyqtSignal, QRectF, QEvent, QPointF, QSize
 # 修复：添加 QImage, QPixmap 导入
 from PyQt6.QtGui import QPainter, QPen, QColor, QFont, QImage, QPixmap, QIcon
@@ -12,6 +12,7 @@ from .doodle_overlay import DoodleOverlay
 from .mosaic_overlay import MosaicOverlay
 from .label_overlay import LabelOverlay 
 from .sticker_overlay import StickerOverlay
+from ..workbench_page import WorkbenchPage
 import cv2
 import numpy as np
 import os
@@ -80,9 +81,9 @@ class EditorPage(QWidget):
         top_layout = QHBoxLayout(top_bar)
         top_layout.setContentsMargins(15, 0, 15, 0)
         
-        btn_back = QPushButton(" 返回菜单")
-        btn_back.setStyleSheet("color: #b2bec3; border: none; font-size: 14px; font-weight: bold;")
-        btn_back.clicked.connect(self.go_back.emit)
+        self.btn_back = QPushButton(" 返回菜单")
+        self.btn_back.setStyleSheet("color: #b2bec3; border: none; font-size: 14px; font-weight: bold;")
+        self.btn_back.clicked.connect(self.go_back.emit)
         
         btn_open = QPushButton("打开图片")
         btn_open.setStyleSheet("QPushButton { background-color: #2d3436; color: white; border: 1px solid #636e72; border-radius: 15px; padding: 5px 15px; font-weight: bold; } QPushButton:hover { background-color: #636e72; }")
@@ -92,7 +93,7 @@ class EditorPage(QWidget):
         btn_save.setStyleSheet("QPushButton { background-color: #0984e3; color: white; border-radius: 15px; padding: 5px 15px; font-weight: bold; } QPushButton:hover { background-color: #74b9ff; }")
         btn_save.clicked.connect(self.save_image)
 
-        top_layout.addWidget(btn_back)
+        top_layout.addWidget(self.btn_back)
         top_layout.addStretch()
         top_layout.addWidget(btn_open)
         top_layout.addSpacing(10)
@@ -1165,6 +1166,27 @@ class EditorPage(QWidget):
                     self.switch_category(1, self.cat_btns[1])
                     self.switch_adjust_tool("brightness", self.adjust_btns[0])
 
+    # [新增] 供主窗口调用的加载方法
+    def load_image_from_path(self, file_path):
+        """从文件路径加载图片到编辑器"""
+        # 错误修复：这里原本写的是 self.processor，改为 self.engine
+        img = self.engine.load_image(file_path)
+        
+        if img is not None:
+            self.canvas.set_image(img)
+            self.canvas.fit_in_view()
+            self.update_overlay_geometry()
+            
+            # 重置工具栏状态到默认
+            if hasattr(self, 'adjust_btns') and len(self.adjust_btns) > 0:
+                self.switch_category(1, self.cat_btns[1])
+                self.switch_adjust_tool("brightness", self.adjust_btns[0])
+            print(f"已加载: {file_path}")
+        else:
+            QMessageBox.warning(self, "错误", "无法读取图片文件")
+
+
+
     def save_image(self):
         if self.engine.original_image is None: return
         final_image = self.engine.render(use_preview=False, include_crop=True)
@@ -1179,6 +1201,7 @@ class EditorPage(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, "保存图片", default_path, "Images (*.jpg *.png)")
         if path:
             try:
+                WorkbenchPage.add_recent_record(path)
                 save_img = cv2.cvtColor(final_image, cv2.COLOR_RGB2BGR)
                 ext = os.path.splitext(path)[1]
                 is_success, im_buf = cv2.imencode(ext, save_img)

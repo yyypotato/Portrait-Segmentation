@@ -130,7 +130,13 @@ class MainWindow(QMainWindow):
         # 初始化各页面
         self.menu_page = MenuPage()
         self.seg_page = SegPage()
-        self.editor_page = EditorPage()
+        self.editor_page = EditorPage()           # 1. 主编辑器：供主菜单使用，状态持久保留
+        self.history_editor_page = EditorPage()   # 2. 历史编辑器：供工作台使用，独立加载
+    
+        # 修改历史编辑器的返回按钮文字，避免混淆
+        if hasattr(self.history_editor_page, 'btn_back'):
+            self.history_editor_page.btn_back.setText(" 返回工作台")
+
         self.help_page = HelpPage()
         # 新增页面初始化
         self.workbench_page = WorkbenchPage()
@@ -139,6 +145,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.menu_page)
         self.stack.addWidget(self.seg_page)
         self.stack.addWidget(self.editor_page)
+        self.stack.addWidget(self.history_editor_page)
         self.stack.addWidget(self.help_page)
         # 添加新页面到堆叠部件
         self.stack.addWidget(self.workbench_page)
@@ -163,6 +170,7 @@ class MainWindow(QMainWindow):
 
         # Editor Page Signals
         self.editor_page.go_back.connect(lambda: self.stack.setCurrentWidget(self.menu_page))
+        self.history_editor_page.go_back.connect(lambda: self.stack.setCurrentWidget(self.workbench_page))
 
         # Help Page Signals
         self.help_page.go_back.connect(lambda: self.stack.setCurrentWidget(self.menu_page))
@@ -170,3 +178,27 @@ class MainWindow(QMainWindow):
         # 新增：连接新页面的返回信号
         self.workbench_page.go_back.connect(lambda: self.stack.setCurrentWidget(self.menu_page))
         self.history_page.go_back.connect(lambda: self.stack.setCurrentWidget(self.menu_page))
+
+        self.workbench_page.open_project.connect(self.on_open_history_project)
+
+    def on_open_history_project(self, file_path):
+        """处理从工作台打开文件的请求 (使用独立编辑器)"""
+        # 1. 切换到历史编辑器实例
+        self.stack.setCurrentWidget(self.history_editor_page)
+        
+        # 2. 加载图片 (只影响这个实例，不影响主编辑器)
+        if hasattr(self.history_editor_page, 'load_image_from_path'):
+            self.history_editor_page.load_image_from_path(file_path)
+        else:
+            print("Error: EditorPage 缺少 load_image_from_path 方法")
+            
+    def on_open_recent_project(self, file_path):
+        """处理从工作台打开文件的请求"""
+        # 1. 切换到编辑页面
+        self.stack.setCurrentWidget(self.editor_page)
+        
+        # 2. 让编辑页面加载图片
+        if hasattr(self.editor_page, 'load_image_from_path'):
+            self.editor_page.load_image_from_path(file_path)
+        else:
+            print("Error: EditorPage 缺少 load_image_from_path 方法")

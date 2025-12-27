@@ -37,6 +37,7 @@ resources/images/background/*
 !resources/images/person/.gitkeep
 !resources/images/background/.gitkeep
 
+resources/config/*.json
 # 忽略根目录下的临时图片文件夹
 images/
 
