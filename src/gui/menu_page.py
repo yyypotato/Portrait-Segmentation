@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-                             QLabel, QFrame, QGraphicsDropShadowEffect, QLineEdit, QSizePolicy)
+                             QLabel, QFrame, QGraphicsDropShadowEffect, QLineEdit, QSizePolicy, QCompleter)
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QDir, QPropertyAnimation, QEasingCurve, QRect, QRectF
 from PyQt6.QtGui import QIcon, QColor, QPixmap, QPainter, QPainterPath, QRegion
 import random
@@ -143,7 +143,7 @@ class MenuPage(QWidget):
     def __init__(self):
         super().__init__()
         self.init_ui()
-
+        self.init_search() # 初始化搜索功能占位符
     def init_ui(self):
         self.setObjectName("MenuPage")
         self.setStyleSheet("""
@@ -197,15 +197,15 @@ class MenuPage(QWidget):
         nav_layout.addWidget(self.btn_nav_work)
         nav_layout.addWidget(self.btn_nav_hist)
 
-        search_bar = QLineEdit()
-        search_bar.setPlaceholderText("🔍 搜索功能...")
-        search_bar.setFixedSize(240, 40)
+        self.search_bar = QLineEdit()
+        self.search_bar.setPlaceholderText("🔍 搜索功能...")
+        self.search_bar.setFixedSize(240, 40)
 
         top_bar.addLayout(logo_box)
         top_bar.addSpacing(60)
         top_bar.addLayout(nav_layout)
         top_bar.addStretch()
-        top_bar.addWidget(search_bar)
+        top_bar.addWidget(self.search_bar)
 
         # --- 2. 中间卡片区 ---
         cards_layout = QHBoxLayout()
@@ -248,6 +248,111 @@ class MenuPage(QWidget):
         main_layout.addLayout(cards_layout, 1)
         main_layout.addLayout(bottom_layout)
 
+    def init_search(self):
+        """初始化搜索补全和逻辑"""
+        # 1. 定义搜索项映射：显示文本 -> (关键词列表, 触发信号)
+        self.search_actions = [
+            {
+                "label": "智能抠图 (Smart Segmentation)",
+                "keywords": ["抠图", "分割", "seg", "remove", "bg", "cut"],
+                "signal": self.go_to_seg
+            },
+            {
+                "label": "图像精修 (Image Editor)",
+                "keywords": ["修图", "编辑", "edit", "crop", "filter", "doodle"],
+                "signal": self.go_to_editor
+            },
+            {
+                "label": "我的工作台 (Workbench)",
+                "keywords": ["工作台", "work", "recent", "task"],
+                "signal": self.go_to_workbench
+            },
+            {
+                "label": "云端历史 (History)",
+                "keywords": ["历史", "history", "cloud", "record"],
+                "signal": self.go_to_history
+            },
+            {
+                "label": "使用说明 (Help)",
+                "keywords": ["帮助", "help", "guide", "manual"],
+                "signal": self.go_to_help
+            },
+            {
+                "label": "退出程序 (Exit)",
+                "keywords": ["退出", "exit", "quit", "close"],
+                "signal": self.exit_app
+            }
+        ]
+        
+        # 2. 提取用于显示的列表
+        completer_list = [item["label"] for item in self.search_actions]
+        
+        # 3. 配置 QCompleter
+        self.completer = QCompleter(completer_list, self)
+        self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive) # 忽略大小写
+        self.completer.setFilterMode(Qt.MatchFlag.MatchContains) # 支持包含匹配(输入"抠图"也能搜到)
+        
+        # 美化下拉列表样式
+        popup = self.completer.popup()
+        popup.setStyleSheet("""
+            QListView {
+                background-color: #1f2435;
+                color: white;
+                border: 1px solid #2b3042;
+                padding: 2px;
+            }
+            QListView::item {
+                padding: 8px;
+                height: 25px;
+            }
+            QListView::item:selected {
+                background-color: #2b3042;
+                color: #00f2ea;
+            }
+            QScrollBar:vertical {
+                width: 8px;
+                background: #141824;
+            }
+            QScrollBar::handle:vertical {
+                background: #3e4559;
+                border-radius: 4px;
+            }
+        """)
+        
+        self.search_bar.setCompleter(self.completer)
+        
+        # 4. 连接信号
+        self.completer.activated.connect(self.on_search_activated)
+        self.search_bar.returnPressed.connect(self.on_search_return)
+
+    def on_search_activated(self, text):
+        """当用户从下拉列表中点击某一项时触发"""
+        for item in self.search_actions:
+            if item["label"] == text:
+                item["signal"].emit()
+                self.search_bar.clear()
+                break
+
+    def on_search_return(self):
+        """当用户输入文字直接按回车时触发 (支持关键词模糊匹配)"""
+        text = self.search_bar.text().strip().lower()
+        if not text: return
+        
+        # 优先匹配 Label
+        for item in self.search_actions:
+            if text in item["label"].lower():
+                item["signal"].emit()
+                self.search_bar.clear()
+                return
+                
+        # 其次匹配 Keywords (例如输入 "edit" 跳转到编辑器)
+        for item in self.search_actions:
+            for kw in item["keywords"]:
+                if kw in text or text in kw:
+                    item["signal"].emit()
+                    self.search_bar.clear()
+                    return
+                
     def create_nav_btn(self, text, active=False):
         btn = QPushButton(text)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
