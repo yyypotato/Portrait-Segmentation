@@ -2,12 +2,22 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                              QLabel, QComboBox, QFileDialog, QFrame, QSizePolicy, 
                              QApplication, QMessageBox, QGraphicsDropShadowEffect) 
 import torch
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QPixmap, QImage, QColor
+from PyQt6.QtCore import Qt, pyqtSignal, QEvent
+from PyQt6.QtGui import QPixmap, QImage, QColor, QCursor
 import cv2
 import numpy as np
 from src.models.factory import ModelFactory
 from src.utils.image_processor import ImageProcessor
+# [新增] 导入修正层
+from .mask_refine_overlay import MaskRefineOverlay
+
+# [新增] 可点击的 Label
+class ClickableLabel(QLabel):
+    clicked = pyqtSignal()
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
 
 class SegPage(QWidget):
     go_back = pyqtSignal() # 返回菜单信号
@@ -26,6 +36,16 @@ class SegPage(QWidget):
         self.composite_rgb = None
 
         self.init_ui()
+        
+        # [新增] 初始化修正覆盖层 (初始隐藏)
+        self.refine_overlay = MaskRefineOverlay(self)
+        self.refine_overlay.hide()
+        self.refine_overlay.finished.connect(self.on_mask_refined)
+
+    def resizeEvent(self, event):
+        # 确保覆盖层始终跟随窗口大小
+        self.refine_overlay.resize(self.size())
+        super().resizeEvent(event)
 
     def init_ui(self):
         self.setObjectName("SegPage")
@@ -66,7 +86,8 @@ class SegPage(QWidget):
         self.layout_proc = self.create_process_column()
 
         # 3. 分割结果卡片
-        self.card_res, self.lbl_result, self.btn_save_res = self.create_image_card(
+        # [修改] 使用 create_result_card 以支持点击
+        self.card_res, self.lbl_result, self.btn_save_res = self.create_result_card(
             "分割结果", "保存透明图", self.save_result
         )
         self.btn_save_res.setEnabled(False)
@@ -185,6 +206,78 @@ class SegPage(QWidget):
         layout.addWidget(btn)
         
         # 添加阴影
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(20)
+        shadow.setColor(QColor(0, 0, 0, 50))
+        shadow.setOffset(0, 5)
+        card.setGraphicsEffect(shadow)
+
+        return card, lbl_image, btn
+
+    # [新增] 专门用于结果卡片的创建方法，使用 ClickableLabel
+    def create_result_card(self, title_text, btn_text, btn_callback):
+        card = QFrame()
+        card.setProperty("class", "Card")
+        card.setFixedWidth(320)
+        
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        title = QLabel(title_text)
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff;")
+        
+        # [修改] 使用 ClickableLabel
+        lbl_image = ClickableLabel()
+        lbl_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_image.setText("等待处理")
+        lbl_image.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        lbl_image.setCursor(Qt.CursorShape.PointingHandCursor) # 提示可点击
+        lbl_image.setToolTip("点击图片进行手动修正")
+        lbl_image.clicked.connect(self.open_refine_overlay) # 连接点击事件
+        
+        lbl_image.setStyleSheet("""
+            QLabel {
+                background-color: #141824;
+                border: 2px dashed #2b3042;
+                border-radius: 12px;
+                color: #5c6375;
+                font-size: 13px;
+            }
+            QLabel:hover {
+                border-color: #00f2ea;
+            }
+        """)
+        
+        btn = QPushButton(btn_text)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setFixedHeight(40)
+        btn.clicked.connect(btn_callback)
+        btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2b3042;
+                border: 1px solid #3e4559;
+                border-radius: 8px;
+                color: #ffffff;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #353b50;
+                border-color: #00f2ea;
+                color: #00f2ea;
+            }
+            QPushButton:disabled {
+                background-color: #1f2435;
+                color: #5c6375;
+                border-color: #2b3042;
+            }
+        """)
+
+        layout.addWidget(title)
+        layout.addWidget(lbl_image)
+        layout.addWidget(btn)
+        
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(20)
         shadow.setColor(QColor(0, 0, 0, 50))
@@ -444,22 +537,7 @@ class SegPage(QWidget):
             mask = self.model.predict(image_rgb, max_size=max_size)
             self.mask_raw = mask 
 
-            h, w, c = image_rgb.shape
-            rgba_image = np.zeros((h, w, 4), dtype=np.uint8)
-            rgba_image[:, :, :3] = image_rgb
-            rgba_image[:, :, 3] = mask
-
-            self.result_rgba = rgba_image
-
-            qimg = QImage(rgba_image.data, w, h, w * 4, QImage.Format.Format_RGBA8888)
-            result_pix = QPixmap.fromImage(qimg)
-            
-            self.lbl_result.setPixmap(result_pix.scaled(self.lbl_result.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-            # 更新样式：青色边框
-            self.lbl_result.setStyleSheet("border: 2px solid #00f2ea; border-radius: 12px;")
-            
-            self.btn_save_res.setEnabled(True)
-            self.btn_bg.setEnabled(True)
+            self.update_result_display() # 封装显示逻辑
 
         except torch.cuda.OutOfMemoryError:
             print("捕获到显存不足错误！")
@@ -470,6 +548,48 @@ class SegPage(QWidget):
             print(f"分割出错: {e}")
             self.lbl_result.setText("运行出错")
             QMessageBox.warning(self, "错误", f"运行过程中发生错误：\n{str(e)}")
+
+    def update_result_display(self):
+        """更新结果显示 (在分割完成或修正完成后调用)"""
+        if self.original_rgb is None or self.mask_raw is None: return
+
+        h, w, c = self.original_rgb.shape
+        rgba_image = np.zeros((h, w, 4), dtype=np.uint8)
+        rgba_image[:, :, :3] = self.original_rgb
+        rgba_image[:, :, 3] = self.mask_raw
+
+        self.result_rgba = rgba_image
+
+        qimg = QImage(rgba_image.data, w, h, w * 4, QImage.Format.Format_RGBA8888)
+        result_pix = QPixmap.fromImage(qimg)
+        
+        self.lbl_result.setPixmap(result_pix.scaled(self.lbl_result.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        self.lbl_result.setStyleSheet("border: 2px solid #00f2ea; border-radius: 12px;")
+        
+        self.btn_save_res.setEnabled(True)
+        self.btn_bg.setEnabled(True)
+        
+        # 如果有背景，也更新合成图
+        if self.bg_rgb is not None:
+            self.update_composite()
+
+    # [新增] 打开修正覆盖层
+    def open_refine_overlay(self):
+        if self.original_rgb is None or self.mask_raw is None:
+            return
+        
+        # 将数据传递给覆盖层
+        self.refine_overlay.set_data(self.original_rgb, self.mask_raw)
+        self.refine_overlay.resize(self.size())
+        self.refine_overlay.show()
+        self.refine_overlay.raise_() # 确保在最上层
+
+    # [新增] 修正完成回调
+    def on_mask_refined(self, new_mask):
+        if new_mask is not None:
+            self.mask_raw = new_mask
+            self.update_result_display()
+            QMessageBox.information(self, "成功", "蒙版修正已应用！")
 
     def select_background(self):
         path, _ = QFileDialog.getOpenFileName(self, "选择背景", "", "Images (*.png *.jpg *.jpeg)")
