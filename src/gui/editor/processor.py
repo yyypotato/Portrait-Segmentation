@@ -279,6 +279,9 @@ class ImageEditorEngine:
         if mask_qimage.isNull(): return original_img
         
         # 1. Mask QImage -> numpy
+        # 【修复】必须转换为 RGBA8888 格式，否则 bits() 读取的字节顺序可能错误 (如 ARGB vs RGBA)
+        mask_qimage = mask_qimage.convertToFormat(QImage.Format.Format_RGBA8888)
+        
         ptr = mask_qimage.bits()
         ptr.setsize(mask_qimage.height() * mask_qimage.width() * 4)
         mask_arr = np.frombuffer(ptr, np.uint8).reshape((mask_qimage.height(), mask_qimage.width(), 4))
@@ -309,6 +312,9 @@ class ImageEditorEngine:
         if label_qimage.isNull(): return current_bg_img
         
         # 1. QImage -> numpy (RGBA)
+        # 【修复】必须转换为 RGBA8888 格式，否则 bits() 读取的字节顺序可能错误
+        label_qimage = label_qimage.convertToFormat(QImage.Format.Format_RGBA8888)
+        
         ptr = label_qimage.bits()
         ptr.setsize(label_qimage.height() * label_qimage.width() * 4)
         label_arr = np.frombuffer(ptr, np.uint8).reshape((label_qimage.height(), label_qimage.width(), 4))

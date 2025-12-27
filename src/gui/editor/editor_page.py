@@ -877,26 +877,45 @@ class EditorPage(QWidget):
     def save_frame(self):
         if self.engine.original_image is None: return
         
-        # 1. 获取当前基础图像
-        current_img = self.engine.render(use_preview=True, include_crop=True)
+        # 1. 备份当前的非几何参数 (滤镜、调节数值)
+        # 这样我们可以在应用相框后恢复它们，而不是重置为0
+        saved_filter = self.engine.current_filter
+        saved_params = self.engine.params.copy()
         
-        # 2. 应用相框
+        # 2. 临时重置滤镜和调节参数
+        # 目的是获取一张“干净”的、只应用了裁剪/旋转的底图
+        self.engine.update_filter("f_original")
+        for k in self.engine.params:
+            self.engine.params[k] = 0
+            
+        # 3. 获取基础图像 (包含裁剪/旋转，但不含滤镜/调节)
+        # 这样生成的图片是纯净的，不会带有之前的滤镜效果
+        base_img = self.engine.render(use_preview=True, include_crop=True)
+        
+        # 4. 应用相框
         if hasattr(self, 'current_frame_type'):
-            final_img = self.generate_framed_image(current_img, self.current_frame_type)
+            final_img = self.generate_framed_image(base_img, self.current_frame_type)
             
-            # 3. 更新 Engine
-            # 注意：相框改变了图像尺寸，我们需要更新 original_image 并重置几何参数
-            # 这是一个破坏性操作，会将之前的滤镜、裁剪等“烘焙”到新底图中
+            # 5. 更新 Engine 底图
+            # 将“几何变换+相框”后的图作为新的底图
             self.engine.original_image = final_img
-            self.engine.preview_image = final_img
+            self.engine.preview_image = final_img.copy()
             
-            # 重置裁剪和旋转，因为它们已经应用在 final_img 中了
+            # 6. 重置几何参数 (因为裁剪/旋转已经烘焙到新底图里了)
             self.engine.geo_params["crop_rect"] = None
             self.engine.geo_params["rotate_angle"] = 0
             self.engine.geo_params["rotate_90"] = 0
             self.engine.geo_params["flip_h"] = False
             
-            self.canvas.set_image(final_img)
+            # 7. 恢复滤镜和调节参数 (关键步骤)
+            # 恢复之前的设置，这样用户看到的界面数值不变，且效果是应用在带相框的图上
+            self.engine.current_filter = saved_filter
+            self.engine.params = saved_params
+            
+            # 8. 刷新显示
+            # 重新渲染，将滤镜/调节应用到新的带相框底图上
+            new_render = self.engine.render(use_preview=True, include_crop=True)
+            self.canvas.set_image(new_render)
             
         self.hide_action_bar()
         self.switch_category(1, self.cat_btns[1])
