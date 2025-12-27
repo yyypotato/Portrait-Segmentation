@@ -113,6 +113,32 @@ class ImageEditorEngine:
             hsv = np.clip(hsv, 0, 255).astype(np.uint8)
             img = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
 
+        # --- [新增] 高光 & 阴影处理 (LAB 空间) ---
+        if self.params["highlights"] != 0 or self.params["shadows"] != 0:
+            # 转换到 LAB 空间，L 通道代表亮度 (0-255)
+            lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
+            l, a, b = cv2.split(lab)
+            l = l.astype(np.float32)
+
+            # 阴影调节 (Shadows) - 针对暗部 (L < 128)
+            if self.params["shadows"] != 0:
+                # 创建掩膜：越暗的地方权重越大
+                mask = np.clip((128.0 - l) / 128.0, 0, 1.0)
+                # 调节亮度：shadows > 0 提亮阴影
+                l += self.params["shadows"] * mask * 0.6 # 0.6 为强度系数
+
+            # 高光调节 (Highlights) - 针对亮部 (L > 128)
+            if self.params["highlights"] != 0:
+                # 创建掩膜：越亮的地方权重越大
+                mask = np.clip((l - 128.0) / 128.0, 0, 1.0)
+                # 调节亮度：highlights < 0 压暗高光(恢复细节)
+                l += self.params["highlights"] * mask * 0.6
+
+            l = np.clip(l, 0, 255).astype(np.uint8)
+            lab = cv2.merge((l, a, b))
+            img = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+        # ---------------------------------------
+
         # 转回 float32 继续处理锐化
         img = img.astype(np.float32)
 
